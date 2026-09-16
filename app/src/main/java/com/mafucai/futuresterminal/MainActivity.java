@@ -1,4 +1,4 @@
-package com.coomi.futuresterminal;
+package com.mafucai.futuresterminal;
 
 import android.annotation.SuppressLint;
 import android.graphics.Bitmap;

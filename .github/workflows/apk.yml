@@ -1,4 +1,4 @@
-name: Build Release APK
+name: Futures Terminal APK
 
 on:
   push:
@@ -9,105 +9,77 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Assemble release APK
-    runs-on: ubuntu-latest
-
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up JDK 17
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - name: Set up Android SDK
-        run: |
-          # ubuntu-latest runner 已预装 Android SDK（ANDROID_HOME 已设）
-          echo "ANDROID_HOME=${ANDROID_HOME}"
-          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
-          ls "${ANDROID_HOME}/platforms" || true
-          ls "${ANDROID_HOME}/build-tools" || true
-          # 确保 compileSdk 34 的 platform 与 build-tools 存在
-          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
-          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-34" "build-tools;34.0.0" > /dev/null 2>&1 || true
-
-      - name: Write local.properties
-        run: echo "sdk.dir=${ANDROID_HOME}" > local.properties
-
-      # ----------------------------------------------------------------------
-      # 可选：Release 签名
-      # 配置仓库 Secrets（Settings -> Secrets and variables -> Actions）：
-      #   KEYSTORE_BASE64    keystore 文件的 base64（base64 -w0 release.keystore）
-      #   KEYSTORE_PASSWORD  keystore 密码
-      #   KEY_ALIAS          别名
-      #   KEY_PASSWORD       别名密码
-      # 未配置时回退到 Android 自动生成的 debug 签名，仍可安装。
-      # ----------------------------------------------------------------------
-      - name: Decode release keystore (optional)
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        if: env.KEYSTORE_BASE64 != ''
-        run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > "${RUNNER_TEMP}/release.keystore"
-
-      - name: Configure signing env (optional)
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        if: env.KEYSTORE_BASE64 != ''
-        run: |
-          {
-            echo "KEYSTORE_PATH=${RUNNER_TEMP}/release.keystore"
-            echo "KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD}"
-            echo "KEY_ALIAS=${KEY_ALIAS}"
-            echo "KEY_PASSWORD=${KEY_PASSWORD}"
-          } >> "${GITHUB_ENV}"
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x ./gradlew
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
+        uses: android-actions/setup-android@v3
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
-
+          # Google 已下架 'tools' 包（默认值含它会导致 Failed to find package 'tools'）
+          packages: 'platform-tools'
+      - name: Install Android platform
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Build release APK
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
-
-      - name: Upload release APK
+        run: ./gradlew --no-daemon --max-workers=2 :app:assembleRelease
+      - name: Sign release APK
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEYSTORE_ALIAS_NAME: ${{ secrets.KEYSTORE_ALIAS }}
+        run: |
+          set -euo pipefail
+          SDK_BUILD_TOOLS="${ANDROID_HOME}/build-tools/35.0.0"
+          # 先发现实际产物名，不猜测
+          find app/build/outputs/apk/release -type f -name '*.apk' -print
+          # 固定正式签名：从 Secrets 还原 keystore（覆盖安装、数据不丢的前提）
+          # 未配置 Secrets 时回退到 debug 签名（仅用于首次安装验证）
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          SIGNED="app/build/outputs/apk/release/futuresterminal-release.apk"
+          if [ -z "${KEYSTORE_B64}" ]; then
+            echo "::warning::未配置 KEYSTORE_BASE64，回退 debug 签名（验证包，不能覆盖安装正式包）"
+            UNSIGNED="app/build/outputs/apk/release/app-release.apk"
+            test -f "${UNSIGNED}"
+            cp "${UNSIGNED}" "${SIGNED}"
+            "${SDK_BUILD_TOOLS}/apksigner" verify "${SIGNED}"
+          else
+            echo -n "${KEYSTORE_B64}" | base64 -d > release-fixed.jks
+            test -s release-fixed.jks
+            test -f "${UNSIGNED}"
+            "${SDK_BUILD_TOOLS}/apksigner" sign \
+              --ks release-fixed.jks --ks-pass "pass:${KEYSTORE_PASS}" \
+              --ks-key-alias "${KEYSTORE_ALIAS_NAME}" \
+              --key-pass "pass:${KEYSTORE_PASS}" --out "${SIGNED}" "${UNSIGNED}"
+            "${SDK_BUILD_TOOLS}/apksigner" verify "${SIGNED}"
+            "${SDK_BUILD_TOOLS}/apksigner" verify --print-certs "${SIGNED}" | head -4
+            rm -f release-fixed.jks
+          fi
+          # 构建后必须做的 APK 级验证
+          stat -c '%s bytes %n' "${SIGNED}"
+          unzip -tq "${SIGNED}"
+          sha256sum "${SIGNED}"
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-apk
-          path: app/build/outputs/apk/release/*.apk
+          name: futuresterminal-apk
+          path: app/build/outputs/apk/release/futuresterminal-release.apk
           if-no-files-found: error
-          retention-days: 30
-
-      # 主子钦定流程：云端编译 + Release 下载
-      - name: Rename APK
+      - name: Publish GitHub Release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p out
-          cp app/build/outputs/apk/release/*.apk out/futures-terminal-v1.0.0.apk
-          ls -la out/
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: build-${{ github.run_number }}
-          name: Futures Terminal build-${{ github.run_number }}
-          body: |
-            期货终端 v2 — Android WebView 版
-            自动构建自 commit ${{ github.sha }}
-          files: out/futures-terminal-v1.0.0.apk
-          draft: false
-          prerelease: false
+          set -euo pipefail
+          TAG="build-${GITHUB_RUN_NUMBER}"
+          gh release create "${TAG}" \
+            app/build/outputs/apk/release/futuresterminal-release.apk \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "期货终端 ${TAG}" \
+            --notes "期货终端 v2 Android 版 — 云端构建 APK。数据源：新浪期货 K 线 / 实时行情。"
