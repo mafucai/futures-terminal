@@ -146,11 +146,19 @@ window.Screener = (function () {
       }
       if (ctx.signals.length > 0) {
         const last = ctx.signals[ctx.signals.length - 1];
+        // 5 信号加权评分（可解释）；Scoring 缺失时降级为 null，不阻断
+        let sc = null;
+        try { if (window.Scoring) sc = window.Scoring.scoreContract(klines); } catch (e) { sc = null; }
         results.push({
           code: contract.code, name: contract.name,
           price: klines[klines.length - 1].close,
           signal: { type: last.type, reason: last.reason || '-' },
-          signals: ctx.signals.length
+          signals: ctx.signals.length,
+          score: sc && sc.ok ? sc.score : null,
+          grade: sc ? sc.grade : null,
+          rules: sc ? sc.rules : [],
+          summary: sc ? sc.summary : null,
+          scoreDetail: sc
         });
       }
     }
@@ -215,5 +223,13 @@ window.Screener = (function () {
     return { ok: true, totalTargets: contracts.length, skipped, fetched, results, time: new Date().toISOString() };
   }
 
-  return { screenWithCode, screenMultiPeriod, scoreEma26, Store, cacheKline, readKlineCache, getContracts };
+  // ── 对候选批量做 5 信号评分并排名（供 AI 二轮分析的"第一轮结果"）──
+  function scoreAll(items) {
+    if (!window.Scoring) return items.map(it => Object.assign({}, it, { score: null, rank: null }));
+    return window.Scoring.scoreAndRank(items.map(it => ({
+      code: it.code, name: it.name, price: it.price, klines: it.klines || readKlineCache(it.code, 101) || []
+    })));
+  }
+
+  return { screenWithCode, screenMultiPeriod, scoreEma26, scoreAll, Store, cacheKline, readKlineCache, getContracts };
 })();

@@ -1,43 +1,55 @@
-/* =============================================
-   router.js — 中央路由（RouteRegistry）
-   所有页面切换、事件统一走这里，不覆写全局函数
-   ============================================= */
-window.RouteRegistry = (function () {
-  const handlers = {};   // 事件名 -> [fn,...]
-  const pageHandlers = {}; // 页面名 -> { onEnter: fn }
+/* ═══ 中央路由（RouteRegistry）═══
+   文档 §六 既定约定：所有事件走 RouteRegistry.dispatch(event, payload)，
+   页面切换用 RouteRegistry.navigate(page)。
+   本文件保持与文档一致的 API 契约，供各视图注册/派发。
+*/
+(function () {
+  'use strict';
+
+  const handlers = Object.create(null);
+  const pages = Object.create(null);
+  let current = null;
 
   function register(event, fn) {
-    if (typeof fn !== 'function') return;
-    if (!handlers[event]) handlers[event] = [];
-    handlers[event].push(fn);
+    if (typeof fn !== 'function') throw new Error('handler must be a function');
+    handlers[event] = fn;
+    return fn;
   }
 
   function dispatch(event, payload) {
-    (handlers[event] || []).forEach(fn => {
-      try { fn(payload); } catch (e) { console.error('[Route:' + event + ']', e.message); }
-    });
-  }
-
-  // 页面注册
-  function registerPage(name, { onEnter } = {}) {
-    pageHandlers[name] = { onEnter };
-  }
-
-  // 切换页面
-  function navigate(name, payload) {
-    document.querySelectorAll('.page').forEach(p => p.classList.add('page-hidden'));
-    const el = document.getElementById(name);
-    if (el) {
-      el.classList.remove('page-hidden');
-      const pg = pageHandlers[name];
-      if (pg && pg.onEnter) { try { pg.onEnter(payload); } catch (e) { console.error('[Nav]', e.message); } }
+    const fn = handlers[event];
+    if (!fn) {
+      console.warn('[RouteRegistry] no handler for event:', event);
+      return undefined;
     }
-    // 同步 tab 高亮
-    document.querySelectorAll('.tab').forEach(t => {
-      t.classList.toggle('active', t.dataset.page === name);
-    });
-    dispatch('navigate', name);
+    try {
+      return fn(payload);
+    } catch (err) {
+      console.error('[RouteRegistry] handler error for', event, err);
+      return undefined;
+    }
   }
 
-  return { register, dispatch, registerPage, navigate, handlers };
+  function registerPage(name, opts) {
+    pages[name] = opts || {};
+  }
+
+  function navigate(name) {
+    // 1. 切换视图显隐
+    document.querySelectorAll('.view').forEach(function (el) {
+      el.classList.toggle('off', el.id !== name);
+    });
+    // 2. 同步导航高亮
+    document.querySelectorAll('.nav-item').forEach(function (btn) {
+      btn.classList.toggle('on', btn.dataset.view === name);
+    });
+    // 3. 触发页面进入钩子
+    const page = pages[name];
+    if (page && typeof page.onEnter === 'function') {
+      try { page.onEnter(); } catch (err) { console.error('[RouteRegistry] onEnter error:', name, err); }
+    }
+    current = name;
+  }
+
+  window.RouteRegistry = { register, dispatch, registerPage, navigate, handlers, pages, get current() { return current; } };
 })();

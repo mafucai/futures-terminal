@@ -13,6 +13,7 @@ import android.app.Activity;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.Charset;
@@ -171,6 +172,89 @@ public class MainActivity extends Activity {
                 cs = StandardCharsets.UTF_8;
             }
             return request(url, userAgent, referer, cs);
+        }
+
+        /**
+         * POST a JSON body to a URL and return the response body (UTF-8).
+         *
+         * <p>Used by the AI analysis feature (OpenAI-compatible endpoints take POST).
+         * The {@code headersJson} argument is a flat JSON object of extra headers,
+         * e.g. {"Authorization":"Bearer sk-..."}; pass null/empty for none.
+         *
+         * @param url         fully-qualified http(s) URL
+         * @param body        request body (JSON string); may be empty
+         * @param headersJson flat JSON object of extra headers, or null
+         * @return response body, or a string prefixed with {@code __ERR__} on failure
+         */
+        @JavascriptInterface
+        public String httpPost(String url, String body, String headersJson) {
+            return requestWithBody(url, body, headersJson, StandardCharsets.UTF_8);
+        }
+
+        /** Backward-compatible two-argument overload (no extra headers). */
+        @JavascriptInterface
+        public String httpPost(String url, String body) {
+            return requestWithBody(url, body, null, StandardCharsets.UTF_8);
+        }
+
+        /**
+         * Shared synchronous HTTP implementation for POST with JSON body and
+         * optional extra headers. Mirrors {@link #request} error conventions
+         * ({@code __ERR__}-prefixed string, never throws into JS).
+         */
+        private String requestWithBody(String url, String body, String headersJson, Charset charset) {
+            if (url == null || url.isEmpty()) return "__ERR__empty url";
+            HttpURLConnection conn = null;
+            try {
+                URL u = new URL(url);
+                conn = (HttpURLConnection) u.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                conn.setReadTimeout(READ_TIMEOUT_MS);
+                conn.setInstanceFollowRedirects(true);
+                conn.setDoOutput(true);
+                conn.setRequestProperty("User-Agent", DEFAULT_UA);
+                conn.setRequestProperty("Accept", "*/*");
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                conn.setRequestProperty("Accept-Encoding", "identity");
+
+                // 解析扁平 headers JSON（极简解析，避免引入第三方库）
+                if (headersJson != null && headersJson.trim().length() > 2) {
+                    String h = headersJson.trim();
+                    if (h.startsWith("{") && h.endsWith("}")) h = h.substring(1, h.length() - 1);
+                    for (String pair : h.split(",")) {
+                        int idx = pair.indexOf(':');
+                        if (idx <= 0) continue;
+                        String key = pair.substring(0, idx).trim().replaceAll("^[\"']+|[\"']+$", "");
+                        String val = pair.substring(idx + 1).trim().replaceAll("^[\"']+|[\"']+$", "");
+                        if (!key.isEmpty()) conn.setRequestProperty(key, val);
+                    }
+                }
+
+                String payload = (body == null) ? "" : body;
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(payload.getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                }
+
+                int code = conn.getResponseCode();
+                InputStream in = (code >= 200 && code < 400) ? conn.getInputStream() : conn.getErrorStream();
+                if (in == null) return "__ERR__no response body (http " + code + ")";
+                String resp = readFully(in, charset);
+                in.close();
+                if (code < 200 || code >= 400) {
+                    // 把服务端错误体一并带回，便于前端显示可读原因
+                    String snippet = resp == null ? "" : resp.replaceAll("\\s+", " ");
+                    if (snippet.length() > 300) snippet = snippet.substring(0, 300);
+                    return "__ERR__http " + code + (snippet.isEmpty() ? "" : " " + snippet);
+                }
+                return resp;
+            } catch (Exception e) {
+                String msg = e.getMessage();
+                return "__ERR__" + (msg == null ? e.getClass().getSimpleName() : msg);
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
         }
 
         /**

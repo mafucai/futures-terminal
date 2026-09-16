@@ -1,125 +1,143 @@
-/* =============================================
-   views/list.js — 行情列表页
-   RouteRegistry: list/load-data/refresh-data/toggle-fav
-   ============================================= */
-window.ListView = (function () {
-  const FAV_KEY = 'fv2_favs';
-  let allQuotes = [];
-  let favOnly = false;
-  let lastDataTime = null;   // 记录数据时间
+/* ═══ 视图：行情列表 ═══ */
+(function () {
+  'use strict';
 
-  function getFavs() {
-    try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch(e) { return []; }
+  const STATE = {
+    all: [],            // 全量合约
+    starOnly: false,    // 只看收藏
+    stars: new Set(),   // 收藏代码
+    loaded: false
+  };
+  const STAR_KEY = 'ft_stars';
+
+  function loadStars() {
+    try {
+      const raw = localStorage.getItem(STAR_KEY);
+      if (raw) STATE.stars = new Set(JSON.parse(raw));
+    } catch { /* 忽略损坏数据 */ }
+  }
+  function saveStars() {
+    try { localStorage.setItem(STAR_KEY, JSON.stringify([...STATE.stars])); } catch { /* 忽略 */ }
   }
 
-  function saveFavs(favs) {
-    localStorage.setItem(FAV_KEY, JSON.stringify(favs));
-    renderFavBar();
+  function toggleStar(code) {
+    if (STATE.stars.has(code)) STATE.stars.delete(code);
+    else STATE.stars.add(code);
+    saveStars();
     renderList();
   }
 
-  function toggleFav(code) {
-    let favs = getFavs();
-    if (favs.includes(code)) favs = favs.filter(c => c !== code);
-    else favs.push(code);
-    saveFavs(favs);
+  function toggleStarOnly() {
+    STATE.starOnly = !STATE.starOnly;
+    document.getElementById('favToggle').classList.toggle('on', STATE.starOnly);
+    renderList();
   }
 
   function renderFavBar() {
     const bar = document.getElementById('favBar');
-    const favs = getFavs();
-    if (!favs.length) { bar.style.display = 'none'; return; }
+    const cnt = document.getElementById('favCount');
+    if (cnt) cnt.textContent = STATE.stars.size ? STATE.stars.size + ' 个收藏' : '';
+    if (!bar) return;
+    if (!STATE.stars.size) { bar.style.display = 'none'; return; }
     bar.style.display = 'flex';
-    bar.innerHTML = favs.map(c => {
-      const found = allQuotes.find(q => q[0] === c);
-      const n = found ? (found[1].name || c) : c;
-      return `<span class="fav-tag" data-code="${c}" onclick="RouteRegistry.dispatch('search-code','${c}')">${n} <span class="del" data-code="${c}" onclick="event.stopPropagation();ListView.toggleFav(this.dataset.code)">✕</span></span>`;
-    }).join('');
+    bar.innerHTML = [...STATE.stars].map(code =>
+      `<span class="chip" onclick="RouteRegistry.dispatch('open-detail',{code:'${UI.esc(code)}'})">` +
+      `${UI.esc(code)}<i onclick="event.stopPropagation();ListView.toggleStar('${UI.esc(code)}')">✕</i></span>`
+    ).join('');
+  }
+
+  function card(q) {
+    const chg = Number(q.changePct);
+    const trend = UI.trend(chg);
+    const star = STATE.stars.has(q.code) ? ' star' : '';
+    const stale = UI.isStale(q.time || q.timestamp) ? '<span class="tag-old">⚠️过期</span>' : '';
+    const sign = Number.isFinite(chg) && chg > 0 ? '+' : '';
+    return `
+      <div class="q${star}" data-code="${UI.esc(q.code)}">
+        <div class="q-hd">
+          <div>
+            <div class="q-nm">${UI.esc(q.name || '--')}</div>
+            <div class="q-cd">${UI.esc(q.code || '')}</div>
+          </div>
+          ${stale}
+        </div>
+        <div class="q-px">${UI.num(q.price ?? q.last ?? q.close)}</div>
+        <div class="q-ch ${trend}">${sign}${UI.num(chg)}%</div>
+        <div class="q-ft">
+          <div><div class="k">最高</div><div class="v">${UI.num(q.high)}</div></div>
+          <div><div class="k">最低</div><div class="v">${UI.num(q.low)}</div></div>
+          <div><div class="k">持仓</div><div class="v">${UI.num(q.openInterest ?? q.hold, 0)}</div></div>
+        </div>
+      </div>`;
   }
 
   function renderList() {
-    const kw = document.getElementById('searchInput').value.trim().toLowerCase();
-    let filtered = allQuotes;
-    if (favOnly) { const f = getFavs(); filtered = filtered.filter(q => f.includes(q[0])); }
-    if (kw) filtered = filtered.filter(q => q[0].toLowerCase().includes(kw) || (q[1].name || '').toLowerCase().includes(kw));
+    const box = document.getElementById('quoteContainer');
+    if (!box) return;
+    const kw = (document.getElementById('searchInput')?.value || '').trim().toLowerCase();
 
-    const container = document.getElementById('quoteContainer');
-    const favs = getFavs();
-    let html = '<div class="quote-grid">';
-    for (const [code, q] of filtered) {
-      const pct = Number(q.changePct) || 0;
-      const price = Number(q.price) || 0;
-      const open = Number(q.open) || 0;
-      const high = Number(q.high) || 0;
-      const low = Number(q.low) || 0;
-      const lastClose = Number(q.lastClose) || 0;
-      const changeAmt = Number(q.changeAmt) || 0;
-      const isRise = pct >= 0;
-      const cls = isRise ? 'rise' : 'fall';
-      const arrow = isRise ? '▲' : '▼';
-      const isFav = favs.includes(code);
-      html += `<div class="quote-card${isFav ? ' fav' : ''}" data-code="${code}" onclick="RouteRegistry.dispatch('open-detail','${code}')">`
-        + `<div class="quote-top"><div><div class="quote-name">${window.UI.esc(q.name || code)}</div><div class="quote-code">${code}</div></div>`
-        + `<div style="text-align:right"><div class="quote-price">${price ? price.toFixed(2) : '--'}</div>`
-        + `<div class="quote-change ${cls}">${arrow} ${Math.abs(pct).toFixed(2)}%</div>`
-        + `<button class="btn-star ${isFav ? 'active' : ''}" onclick="event.stopPropagation();ListView.toggleFav('${code}')">${isFav ? '★' : '☆'}</button></div></div>`
-        + `<div class="quote-meta">`
-        + `<div class="quote-meta-item"><div class="quote-meta-label">今开</div><div class="quote-meta-value">${open || '-'}</div></div>`
-        + `<div class="quote-meta-item"><div class="quote-meta-label">最高</div><div class="quote-meta-value">${high || '-'}</div></div>`
-        + `<div class="quote-meta-item"><div class="quote-meta-label">昨收</div><div class="quote-meta-value">${lastClose || '-'}</div></div>`
-        + `<div class="quote-meta-item"><div class="quote-meta-label">涨跌</div><div class="quote-meta-value">${changeAmt || 0}</div></div>`
-        + `<div class="quote-meta-item"><div class="quote-meta-label">最低</div><div class="quote-meta-value">${low || '-'}</div></div>`
-        + `<div class="quote-meta-item"><div class="quote-meta-label">涨幅</div><div class="quote-meta-value">${pct.toFixed(2)}%</div></div>`
-        + `</div></div>`;
+    let list = STATE.all.slice();
+    if (STATE.starOnly) list = list.filter(q => STATE.stars.has(q.code));
+    if (kw) list = list.filter(q =>
+      String(q.code).toLowerCase().includes(kw) || String(q.name || '').toLowerCase().includes(kw));
+
+    renderFavBar();
+
+    if (!list.length) {
+      box.innerHTML = `<div class="blank"><div class="em">${STATE.loaded ? '🔍' : '📂'}</div>
+        <div class="tx">${STATE.loaded ? '没有匹配的合约' : '点击「载入数据」开始'}</div></div>`;
+      return;
     }
-    html += '</div>';
-    container.innerHTML = html;
-    window.UI.setStatus(`${allQuotes.length}个合约 · 显示${filtered.length}个${favOnly ? ' · ⭐只看收藏' : ''}`);
+    box.innerHTML = `<div class="grid">${list.map(card).join('')}</div>`;
+    box.querySelectorAll('.q').forEach(el => {
+      el.addEventListener('click', () => RouteRegistry.dispatch('open-detail', { code: el.dataset.code }));
+    });
   }
 
   async function loadData(refresh) {
+    const box = document.getElementById('quoteContainer');
     const btn = document.getElementById('loadBtn');
-    btn.disabled = true;
-    btn.textContent = refresh ? '⏳ 拉取中...' : '⏳ 加载中...';
-    document.getElementById('quoteContainer').innerHTML = window.UI.loading;
-    window.UI.setStatus(refresh ? '正在拉取最新数据...' : '正在加载缓存...');
+    if (btn) btn.disabled = true;
+    UI.status('正在获取行情…', 'warn');
+    box.innerHTML = '<div class="note"><span class="spin"></span>正在获取行情…</div>';
     try {
-      const j = await window.API.getFutures(refresh);
-      allQuotes = Object.entries(j.data);
-      lastDataTime = j.time || null;
+      const data = await API.futuresAll(refresh);
+      // 兼容后端三种形态：数组 / {list:[...]} / {data:{code:info}} 映射
+      let arr = Array.isArray(data) ? data
+        : Array.isArray(data?.list) ? data.list
+        : Array.isArray(data?.data) ? data.data
+        : (data?.data && typeof data.data === 'object') ? Object.entries(data.data).map(([code, v]) => ({ code, ...(v || {}) }))
+        : [];
+      STATE.all = arr.map(it => ({
+        code: it.code || it.symbol || '',
+        name: it.name || '',
+        price: it.price ?? it.last ?? it.close,
+        changePct: it.changePct ?? it.pct,
+        high: it.high, low: it.low,
+        openInterest: it.openInterest ?? it.hold ?? it.position,
+        time: it.time ?? it.timestamp ?? it.updatedAt
+      })).filter(x => x.code);
+      STATE.loaded = true;
+      UI.status(`行情就绪 · ${STATE.all.length} 个合约`, '');
       renderList();
-      renderFavBar();
-      const tag = j.cached ? '📦 缓存数据' : '🌐 实时数据';
-      const dataTime = window.UI.fmtTime(j.time);
-      const stale = j.cached && window.UI.isStale(j.time, 60);
-      window.UI.setStatus(`全市场期货 · 共${j.total}个合约 · ${tag} · 数据时间:${dataTime}${stale ? ' ⚠️已超1小时' : ''}${j.warn ? ' ⚠️' + j.warn : ''}`);
-    } catch (e) {
-      document.getElementById('quoteContainer').innerHTML = `<div style="color:var(--rise);padding:12px">❌ ${e.message}</div>`;
+    } catch (err) {
+      UI.status('行情获取失败：' + err.message, 'err');
+      box.innerHTML = `<div class="blank"><div class="em">⚠️</div><div class="tx">${UI.esc(err.message)}</div></div>`;
+    } finally {
+      if (btn) btn.disabled = false;
     }
-    btn.disabled = false;
-    btn.textContent = '📂 载入数据';
   }
 
-  function toggleFavOnly() {
-    favOnly = !favOnly;
-    document.getElementById('favFilterBtn').classList.toggle('active', favOnly);
-    renderList();
-  }
+  window.ListView = { renderList, loadData, toggleStar, toggleStarOnly, STATE };
 
-  // 注册路由
   RouteRegistry.register('load-data', () => loadData(false));
   RouteRegistry.register('refresh-data', () => loadData(true));
-  RouteRegistry.register('toggle-fav', () => toggleFavOnly());
-  RouteRegistry.register('search-code', (code) => {
-    document.getElementById('searchInput').value = code;
-    renderList();
+  RouteRegistry.register('open-detail', p => {
+    if (!p || !p.code) return;
+    if (window.DetailView) DetailView.open(p.code);
   });
+  RouteRegistry.register('back-to-list', () => RouteRegistry.navigate('vList'));
+  RouteRegistry.register('toggle-fav', p => toggleStar(p?.code));
 
-  RouteRegistry.registerPage('pageList', {
-    onEnter: () => {
-      if (allQuotes.length === 0) loadData(false);
-    }
-  });
-
-  return { toggleFav, toggleFavOnly, loadData };
+  loadStars();
 })();

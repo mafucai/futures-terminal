@@ -1,62 +1,69 @@
-/* =============================================
-   views/monitor.js — 实时监控页
-   RouteRegistry: monitor-start/monitor-stop
-   ============================================= */
-window.MonitorView = (function () {
-  let monitorRunning = false;
-  let logTimer = null;
+/* ═══ 视图：实时监控 ═══ */
+(function () {
+  'use strict';
 
-  async function startMonitor() {
-    const contractsEl = document.getElementById('monitorContracts');
-    const strategyEl = document.getElementById('strategyEditor');
-    const status = document.getElementById('monitorStatus');
-    const log = document.getElementById('monitorLog');
+  let timer = null;
 
-    let contracts = contractsEl.value.trim().split(/[\s,，]+/).filter(Boolean);
-    if (!contracts.length) {
-      // 默认用收藏列表
-      const favs = JSON.parse(localStorage.getItem('fv2_favs') || '[]');
-      if (favs.length) contracts = favs;
-      else { status.innerHTML = '<span style="color:var(--rise)">请先输入合约代码或添加收藏</span>'; return; }
-    }
+  function appendLog(line) {
+    const el = document.getElementById('monitorLog');
+    if (!el) return;
+    const stamp = UI.fmtTime(Date.now());
+    el.textContent = `[${stamp}] ${line}\n` + (el.textContent === '监控日志将显示在这里' ? '' : el.textContent);
+  }
 
-    status.innerHTML = '<span class="loading"></span> 启动监控...';
+  function setIndicator(running) {
+    const el = document.getElementById('monitorStatus');
+    if (!el) return;
+    el.innerHTML = running
+      ? '<span class="pill run">● 运行中</span>'
+      : '<span class="pill stop">● 未启动</span>';
+  }
+
+  async function start() {
+    const raw = document.getElementById('monitorContracts')?.value.trim() || '';
+    const codes = raw ? raw.split(/[,，]/).map(s => s.trim()).filter(Boolean) : [];
+    if (!codes.length) { appendLog('⚠️ 请先填写合约代码'); return; }
     try {
-      const j = await window.API.monitorStart(contracts, strategyEl.value);
-      monitorRunning = true;
-      status.innerHTML = `<span class="monitor-indicator running">● 运行中 · ${contracts.length}个合约 · 30秒轮询</span>`;
-      log.innerHTML = `[${new Date().toLocaleTimeString('zh-CN')}] 监控已启动，监控 ${contracts.join(', ')}\n`;
-      // 启动日志轮询
-      if (logTimer) clearInterval(logTimer);
-    } catch (e) {
-      status.innerHTML = `<span style="color:var(--rise)">❌ ${window.UI.esc(e.message)}</span>`;
+      await API.monitorStart({ codes });
+      setIndicator(true);
+      appendLog(`▶ 监控已启动：${codes.join(', ')}`);
+      UI.status('监控运行中', '');
+      pollQuotes(codes);
+    } catch (err) {
+      appendLog('❌ 启动失败：' + err.message);
+      UI.status('监控启动失败', 'err');
     }
   }
 
-  async function stopMonitor() {
-    const status = document.getElementById('monitorStatus');
-    try {
-      await window.API.monitorStop();
-      monitorRunning = false;
-      status.innerHTML = '<span class="monitor-indicator stopped">● 已停止</span>';
-      document.getElementById('monitorLog').innerHTML += `[${new Date().toLocaleTimeString('zh-CN')}] 监控已停止\n`;
-      if (logTimer) { clearInterval(logTimer); logTimer = null; }
-    } catch (e) {
-      status.innerHTML = `<span style="color:var(--rise)">❌ ${window.UI.esc(e.message)}</span>`;
-    }
+  async function stop() {
+    if (timer) { clearInterval(timer); timer = null; }
+    try { await API.monitorStop(); } catch { /* 后端可能未启动，忽略 */ }
+    setIndicator(false);
+    appendLog('⏹ 监控已停止');
+    UI.status('已停止', '');
   }
 
-  RouteRegistry.register('monitor-start', () => startMonitor());
-  RouteRegistry.register('monitor-stop', () => stopMonitor());
+  function pollQuotes(codes) {
+    if (timer) clearInterval(timer);
+    timer = setInterval(async () => {
+      for (const code of codes) {
+        try {
+          const q = await API.quote(code);
+          const item = Array.isArray(q) ? q[0] : q;
+          if (!item) continue;
+          const chg = Number(item.changePct ?? item.pct);
+          const mark = Number.isFinite(chg) ? (chg > 0 ? '▲' : chg < 0 ? '▼' : '·') : '·';
+          appendLog(`${mark} ${code}  ${UI.num(item.price ?? item.last ?? item.close)}  ${UI.num(chg)}%`);
+        } catch (err) {
+          appendLog(`⚠️ ${code} 报价失败：${err.message}`);
+        }
+      }
+    }, 30000);
+  }
 
-  RouteRegistry.registerPage('pageMonitor', {
-    onEnter: () => {
-      const contractsEl = document.getElementById('monitorContracts');
-      // 从收藏填充默认合约
-      const favs = JSON.parse(localStorage.getItem('fv2_favs') || '[]');
-      if (favs.length && !contractsEl.value) contractsEl.value = favs.join(', ');
-    }
-  });
+  window.MonitorView = { start, stop };
 
-  return { startMonitor, stopMonitor };
+  RouteRegistry.register('monitor-start', start);
+  RouteRegistry.register('monitor-stop', stop);
+  RouteRegistry.registerPage('vMonitor', { onEnter: () => {} });
 })();
