@@ -1,0 +1,24 @@
+# Built Gradle / Android artifacts
+.gradle/
+build/
+app/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+
+# Keystores (never commit)
+*.jks
+*.keystore
+release.keystore
+
+# Logs
+*.log

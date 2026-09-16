@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色主题底色，与网页 UI 保持一致，避免加载时白屏闪烁 -->
+    <style name="Theme.Futuresterminal" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#0d1117</item>
+    </style>
+</resources>
