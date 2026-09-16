@@ -24,7 +24,19 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          # ubuntu-latest runner 已预装 Android SDK（ANDROID_HOME 已设）
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
+          ls "${ANDROID_HOME}/platforms" || true
+          ls "${ANDROID_HOME}/build-tools" || true
+          # 确保 compileSdk 34 的 platform 与 build-tools 存在
+          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-34" "build-tools;34.0.0" > /dev/null 2>&1 || true
+
+      - name: Write local.properties
+        run: echo "sdk.dir=${ANDROID_HOME}" > local.properties
 
       # ----------------------------------------------------------------------
       # 可选：Release 签名
