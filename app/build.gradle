@@ -19,6 +19,6 @@ android {
     }
 }
 
+// 零第三方依赖：纯 Java/XML + 系统 WebView（模板推荐的轻量组合）
 dependencies {
-    implementation 'androidx.appcompat:appcompat:1.7.0'
 }

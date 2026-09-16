@@ -9,7 +9,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-import androidx.appcompat.app.AppCompatActivity;
+import android.app.Activity;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -38,7 +38,7 @@ import java.nio.charset.StandardCharsets;
  * via {@code loadUrl} with "javascript:" which runs on the UI thread, but the
  * interface invocation itself is off the main thread.
  */
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends Activity {
 
     /** Default browser-ish User-Agent; many finance endpoints reject unknown UAs. */
     private static final String DEFAULT_UA =
