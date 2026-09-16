@@ -29,49 +29,74 @@ jobs:
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Build release APK
         run: ./gradlew --no-daemon --max-workers=2 :app:assembleRelease
+
       - name: Sign release APK
         env:
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
           KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
           KEYSTORE_ALIAS_NAME: ${{ secrets.KEYSTORE_ALIAS }}
+          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          SDK_BUILD_TOOLS="${ANDROID_HOME}/build-tools/35.0.0"
-          # 先发现实际产物名，不猜测
+          BT="${ANDROID_HOME}/build-tools/35.0.0"
+
+          # 1) 先发现实际产物名，不猜测（模板硬约束）
+          echo "=== release 产物清单 ==="
           find app/build/outputs/apk/release -type f -name '*.apk' -print
-          # 固定正式签名：从 Secrets 还原 keystore（覆盖安装、数据不丢的前提）
-          # 未配置 Secrets 时回退到 debug 签名（仅用于首次安装验证）
-          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          UNSIGNED="$(find app/build/outputs/apk/release -type f -name '*-unsigned.apk' -print -quit)"
+          if [ -z "${UNSIGNED}" ]; then
+            # 极少数情况 AGP 直接产出已签名包，则退而取任意 apk
+            UNSIGNED="$(find app/build/outputs/apk/release -type f -name '*.apk' -print -quit)"
+          fi
+          test -n "${UNSIGNED}"
+          test -f "${UNSIGNED}"
+          echo "选定产物: ${UNSIGNED}"
           SIGNED="app/build/outputs/apk/release/futuresterminal-release.apk"
-          if [ -z "${KEYSTORE_B64}" ]; then
-            echo "::warning::未配置 KEYSTORE_BASE64，回退 debug 签名（验证包，不能覆盖安装正式包）"
-            UNSIGNED="app/build/outputs/apk/release/app-release.apk"
-            test -f "${UNSIGNED}"
-            cp "${UNSIGNED}" "${SIGNED}"
-            "${SDK_BUILD_TOOLS}/apksigner" verify "${SIGNED}"
-          else
+
+          # 2) 决定签名方式：有 Secrets 用固定签名；没有则生成临时 keystore（验证包）
+          if [ -n "${KEYSTORE_B64:-}" ]; then
+            echo "使用 Secrets 中的固定签名（可覆盖安装）"
             echo -n "${KEYSTORE_B64}" | base64 -d > release-fixed.jks
             test -s release-fixed.jks
-            test -f "${UNSIGNED}"
-            "${SDK_BUILD_TOOLS}/apksigner" sign \
-              --ks release-fixed.jks --ks-pass "pass:${KEYSTORE_PASS}" \
-              --ks-key-alias "${KEYSTORE_ALIAS_NAME}" \
-              --key-pass "pass:${KEYSTORE_PASS}" --out "${SIGNED}" "${UNSIGNED}"
-            "${SDK_BUILD_TOOLS}/apksigner" verify "${SIGNED}"
-            "${SDK_BUILD_TOOLS}/apksigner" verify --print-certs "${SIGNED}" | head -4
-            rm -f release-fixed.jks
+            KS_PASS="${KEYSTORE_PASS}"
+            KS_ALIAS="${KEYSTORE_ALIAS_NAME}"
+            KS_KEYPASS="${KEY_PASS:-${KEYSTORE_PASSWORD}}"
+          else
+            echo "::warning::未配置 KEYSTORE_BASE64，生成临时 keystore（验证包，不能覆盖安装正式包）"
+            KS_PASS="android"
+            KS_ALIAS="androiddebugkey"
+            KS_KEYPASS="android"
+            keytool -genkeypair -v -keystore release-temp.jks \
+              -alias "${KS_ALIAS}" -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "${KS_PASS}" -keypass "${KS_KEYPASS}" \
+              -dname "CN=FuturesTerminal, OU=CI, O=CI, L=CI, S=CI, C=CN" > /dev/null 2>&1
+            cp release-temp.jks release-fixed.jks
+            test -s release-fixed.jks
           fi
-          # 构建后必须做的 APK 级验证
+
+          # 3) 签名 + 验证（标准顺序，模板硬约束）
+          "${BT}/apksigner" sign \
+            --ks release-fixed.jks --ks-pass "pass:${KS_PASS}" \
+            --ks-key-alias "${KS_ALIAS}" \
+            --key-pass "pass:${KS_KEYPASS}" --out "${SIGNED}" "${UNSIGNED}"
+          "${BT}/apksigner" verify "${SIGNED}"
+          "${BT}/apksigner" verify --print-certs "${SIGNED}" | head -4
+
+          # 4) 构建后 APK 级验证
           stat -c '%s bytes %n' "${SIGNED}"
           unzip -tq "${SIGNED}"
           sha256sum "${SIGNED}"
+
+          rm -f release-fixed.jks release-temp.jks
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: futuresterminal-apk
           path: app/build/outputs/apk/release/futuresterminal-release.apk
           if-no-files-found: error
+
       - name: Publish GitHub Release asset
         env:
           GH_TOKEN: ${{ github.token }}
