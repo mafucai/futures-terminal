@@ -259,6 +259,80 @@
 
   window.SimView = { run, manualOrder, closeOrder, reset, loadStrategies };
 
+  /* ── 对比模拟：同一合约，把所有策略（主策略 + 所有 ＋ 号策略）各跑一遍 ── */
+  async function runAll() {
+    const st = document.getElementById('simStatus');
+    const out = document.getElementById('simAllResult');
+    const { code, period, endDate, qty } = readInputs();
+    if (!code) { if (st) st.innerHTML = '<span style="color:var(--warn)">请先填写合约代码</span>'; return; }
+    if (!loadKlines(code, period)) {
+      if (st) st.innerHTML = `<span style="color:var(--warn)">本地无 ${UI.esc(code)} ${period} 缓存，请先拉取K线</span>`;
+      return;
+    }
+    if (out) out.innerHTML = '<div class="note"><span class="spin"></span>全部策略模拟中…</div>';
+    UI.status('对比模拟中…', 'warn');
+    try {
+      const r = await API.listStrategies();
+      const valid = r.strategies.filter(s => (s.code || '').trim());
+      if (!valid.length) throw new Error('没有可用策略（请先在策略页编写并保存）');
+      const rows = [];
+      for (const s of valid) {
+        try {
+          const sim = await SimEngine.runStrategy(klines, s.code, endDate, { qty, code, period });
+          const sum = SimEngine.summary(sim.account, klines[sim.account.lastIndex >= 0 ? sim.account.lastIndex : klines.length - 1].close);
+          rows.push({ name: s.name || s.id, ok: true, sum, marks: sim.account.marks });
+        } catch (e) {
+          rows.push({ name: s.name || s.id, ok: false, error: e.message });
+        }
+      }
+      const num = v => { const n = parseFloat(String(v == null ? '' : v).replace('%', '')); return Number.isFinite(n) ? n : null; };
+      const ok = rows.filter(x => x.ok);
+      let bestRet = null, bestCode = '';
+      ok.forEach(x => { const v = num(x.sum.totalReturn); if (v != null && (bestRet == null || v > bestRet)) { bestRet = v; bestCode = x.name; } });
+      if (out) out.innerHTML = `<div class="stats" style="margin-top:12px">
+          <div class="stat"><div class="k">策略数</div><div class="v">${rows.length}</div></div>
+          <div class="stat"><div class="k">合约</div><div class="v" style="font-size:13px">${UI.esc(code)}</div></div>
+          <div class="stat"><div class="k">最优</div><div class="v" style="font-size:13px">${bestCode ? UI.esc(bestCode) : '--'}</div></div>
+        </div>
+        <div class="cmp-results">${rows.map(x => {
+          if (!x.ok) return `<div class="cmp-res"><div class="t">${UI.esc(x.name)}</div><div class="line" style="color:var(--danger)">失败：${UI.esc(x.error)}</div></div>`;
+          const s = x.sum, isBest = bestCode === x.name && bestRet != null;
+          const ret = num(s.totalReturn);
+          return `<div class="cmp-res" style="cursor:pointer" onclick="SimView.pick('${UI.esc(x.name)}')">
+            <div class="t">${UI.esc(x.name)}${isBest ? ' 🏆' : ''}</div>
+            <div class="line"><span>总收益</span><b class="${ret > 0 ? 'win' : ret < 0 ? 'lose' : ''}">${s.totalReturn}</b></div>
+            <div class="line"><span>买入/卖出</span><b>${s.buys} / ${s.sells}</b></div>
+            <div class="line"><span>胜率</span><b>${s.winRate}</b></div>
+            <div class="line"><span>最大回撤</span><b>${s.maxDrawdown}</b></div>
+          </div>`;
+        }).join('')}</div>
+        <div class="note" style="margin-top:8px"><span>点任意一张卡片，可把该策略的买卖点画到上面的K线上。</span></div>`;
+      // 缓存本轮结果，供点击切换
+      window.__simAllRows = rows;
+      if (st) st.innerHTML = `<span>✅ 对比模拟完成 · ${rows.length} 套策略</span>`;
+      UI.status('对比模拟完成', '');
+    } catch (err) {
+      if (out) out.innerHTML = `<div class="blank"><div class="em">⚠️</div><div class="tx">${UI.esc(err.message)}</div></div>`;
+      UI.status('对比模拟失败：' + err.message, 'err');
+    }
+  }
+
+  /* 把某套策略的结果画到 K 线上 */
+  function pick(name) {
+    const rows = window.__simAllRows || [];
+    const r = rows.find(x => x.name === name && x.ok);
+    if (!r) return;
+    acc = { initialCash: 100000, cash: 100000, position: 0, avgPrice: 0, marks: r.marks, trades: [], equity: [] };
+    // 用简化账户也能画买卖点
+    renderTrades();
+    drawChart();
+    const st = document.getElementById('simStatus');
+    if (st) st.innerHTML = `<span>已把「${UI.esc(name)}」的买卖点画到K线上</span>`;
+  }
+
+  window.SimView.runAll = runAll;
+  window.SimView.pick = pick;
+
   RouteRegistry.register('sim-run', run);
   RouteRegistry.register('sim-reset', reset);
   RouteRegistry.registerPage('vSim', {

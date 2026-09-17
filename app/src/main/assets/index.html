@@ -58,6 +58,13 @@
           <option value="60">60分</option>
         </select>
         <button class="btn btn-p" id="incrBtn" onclick="ListView.incrementalUpdate()">⤓ 增量更新</button>
+        <button class="btn btn-p" id="incrAllBtn" onclick="ListView.incrementalUpdateAll()">⤓ 拉取全部合约</button>
+        <label class="note" style="margin:0;display:flex;align-items:center;gap:5px;flex:0 0 auto">
+          <input type="checkbox" id="incrAllMain" checked style="width:auto;flex:none"> 仅主连
+        </label>
+      </div>
+      <div id="incrProgressWrap" style="display:none;height:8px;background:var(--s2);border-radius:6px;overflow:hidden;margin:0 0 8px">
+        <div id="incrProgress" style="height:100%;width:0;background:linear-gradient(90deg,var(--brand),var(--brand-2));transition:width .2s"></div>
       </div>
       <div class="note" id="incrStatus"><span>🔒 不自动联网：所有拉取都要手动点按钮。增量=只补新K线，旧数据不删不动。</span></div>
       <div id="favBar" class="chips" style="display:none"></div>
@@ -95,6 +102,8 @@
         <div class="panel-title">策略编辑器</div>
         <div class="panel-acts">
           <button class="btn btn-g btn-xs" onclick="RouteRegistry.dispatch('load-strategy')">读取</button>
+          <button class="btn btn-g btn-xs" onclick="StrategyView.loadExample('EMA26_MULTI')">📄 载入示例(多周期)</button>
+          <button class="btn btn-g btn-xs" onclick="StrategyView.loadExample('EMA_CROSS')">📄 示例(单周期)</button>
           <button class="btn btn-p btn-xs" onclick="RouteRegistry.dispatch('save-strategy')">💾 保存</button>
         </div>
       </div>
@@ -194,11 +203,14 @@
       </div>
       <div class="row">
         <select id="simStrategy" style="flex:2"><option value="">— 选择要执行的策略 —</option></select>
+        <button class="btn btn-g" onclick="SimView.loadStrategies()">⟳ 刷新策略</button>
         <input type="number" id="simQty" value="1" min="1" placeholder="手数" style="flex:0 0 80px">
         <button class="btn btn-p" id="simBuyBtn" onclick="SimView.manualOrder('BUY')">▲ 买入</button>
         <button class="btn btn-d" id="simSellBtn" onclick="SimView.manualOrder('SELL')">▼ 卖出</button>
         <button class="btn btn-g" onclick="SimView.closeOrder()">平仓</button>
+        <button class="btn btn-g" onclick="SimView.runAll()">▶ 对比模拟（全部策略）</button>
       </div>
+      <div id="simAllResult"></div>
       <div class="note" id="simStatus"><span>数据来自本地缓存（不自动联网）；缺K线请先在详情页「⤓ 拉取K线(增量)」。</span></div>
       <div class="sim-pos" id="simPos"></div>
       <div id="simChart" style="width:100%;height:360px;background:var(--s2);border-radius:var(--r-sm)"></div>
@@ -277,6 +289,7 @@
 <script src="js/scoring.js"></script>
 <script src="js/webdata.js"></script>
 <script src="js/strategy-runner.js"></script>
+<script src="js/strategy-templates.js"></script>
 <script src="js/screener.js"></script>
 <script src="js/backtest.js"></script>
 <script src="js/router.js"></script>

@@ -90,7 +90,20 @@
     }
   }
 
-  window.StrategyView = { loadStrategy, saveStrategy, runScreen, onEnter };
+  /* 一键把内置 JS 示例填进编辑器 */
+  function loadExample(kind) {
+    const ta = document.getElementById('strategyEditor');
+    const st = document.getElementById('strategyStatus');
+    if (!ta) return;
+    const tpl = (window.StrategyTemplates || {})[kind];
+    if (!tpl) { if (st) st.innerHTML = '<span style="color:var(--danger)">未找到示例</span>'; return; }
+    if (ta.value.trim() && !confirm('编辑器里已有内容，确定用示例覆盖吗？')) return;
+    ta.value = tpl;
+    if (st) st.innerHTML = '<span>✅ 已载入示例（JavaScript）。记得点「💾 保存」后再筛选取用。</span>';
+    UI.status('已载入示例策略', '');
+  }
+
+  window.StrategyView = { loadStrategy, saveStrategy, runScreen, onEnter, loadExample };
 
   RouteRegistry.register('load-strategy', loadStrategy);
   RouteRegistry.register('save-strategy', saveStrategy);

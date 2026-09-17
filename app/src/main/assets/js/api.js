@@ -267,6 +267,18 @@
       return Promise.resolve({ at: t });
     },
 
+    /* 10d. 一键增量更新【全部合约】：合约清单取自本地 futures 缓存（不联网）。
+       仅当本地没有合约清单时才提示先「载入行情」。all=true 时含非主连。 */
+    async incrementalUpdateAll(periods, onProgress, opts) {
+      const onlyMain = !(opts && opts.all);
+      const fut = SCR.Store.loadFutures();
+      if (!fut || !fut.data) throw new Error('本地还没有合约清单，请先点「📂 载入行情」');
+      let codes = Object.keys(fut.data);
+      if (onlyMain) codes = codes.filter(c => /m$/.test(c)); // 主连
+      if (!codes.length) throw new Error('本地合约清单为空');
+      return this.incrementalUpdate(codes, periods, onProgress);
+    },
+
     /* ═══ AI（走原生桥 httpPost；无桥则明确报错，不静默） ═══ */
     aiModels(baseUrl, key) {
       return aiCall({ baseUrl, key, pathname: '/models', method: 'GET' });

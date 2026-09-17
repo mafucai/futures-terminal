@@ -160,7 +160,41 @@
     }
   }
 
-  window.ListView = { renderList, loadData, incrementalUpdate, toggleStar, toggleStarOnly, STATE };
+  /* 一键「拉取全部合约」：合约清单来自本地缓存，只对新K线做增量合并 */
+  async function incrementalUpdateAll() {
+    const periods = (document.getElementById('incrPeriod')?.value || '101,240,60')
+      .split(',').map(s => Number(s.trim())).filter(Boolean);
+    const onlyMain = document.getElementById('incrAllMain')?.checked !== false;
+    const st = document.getElementById('incrStatus');
+    const btn = document.getElementById('incrAllBtn');
+    const wrap = document.getElementById('incrProgressWrap');
+    const bar = document.getElementById('incrProgress');
+    const t0 = Date.now();
+    if (btn) btn.disabled = true;
+    if (wrap) wrap.style.display = 'block';
+    UI.status('正在拉取全部合约（增量）…', 'warn');
+    try {
+      const r = await API.incrementalUpdateAll(periods, (done, total, code, p) => {
+        const pct = total ? Math.round(done / total * 100) : 0;
+        if (bar) bar.style.width = pct + '%';
+        const elapsed = (Date.now() - t0) / 1000;
+        const eta = done ? Math.round((total - done) * (elapsed / done)) : 0;
+        if (st) st.innerHTML = `<span class="spin"></span>${done}/${total}（${pct}%）剩余约 ${eta}s · ${UI.esc(code)} ${p}`;
+      }, { all: !onlyMain });
+      const secs = ((Date.now() - t0) / 1000).toFixed(1);
+      if (st) st.innerHTML = `✅ 全部完成：${secs}s · 新增 ${r.added} 根 · 更新末根 ${r.updated} 次 · 共 ${r.done} 项`
+        + (r.failed.length ? ` · <span style="color:var(--warn)">${r.failed.length} 项无数据</span>` : '') + '（旧数据保留）';
+      UI.status(`全量增量完成 · 新增 ${r.added} 根 · ${secs}s`, '');
+    } catch (err) {
+      if (st) st.innerHTML = `<span style="color:var(--danger)">全量增量失败：${UI.esc(err.message)}</span>`;
+      UI.status('全量增量失败：' + err.message, 'err');
+    } finally {
+      if (btn) btn.disabled = false;
+      setTimeout(() => { if (wrap) wrap.style.display = 'none'; if (bar) bar.style.width = '0'; }, 1500);
+    }
+  }
+
+  window.ListView = { renderList, loadData, incrementalUpdate, incrementalUpdateAll, toggleStar, toggleStarOnly, STATE };
 
   RouteRegistry.register('load-data', () => loadData(false));
   RouteRegistry.register('refresh-data', () => loadData(true));
