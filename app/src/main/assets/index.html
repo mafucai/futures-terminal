@@ -29,6 +29,7 @@
     <button class="nav-item on" data-view="vList">📋 行情</button>
     <button class="nav-item" data-view="vStrategy">✏️ 策略</button>
     <button class="nav-item" data-view="vBacktest">📊 回测</button>
+    <button class="nav-item" data-view="vSim">🎯 模拟盘</button>
     <button class="nav-item" data-view="vMonitor">📡 监控</button>
     <button class="nav-item" data-view="vAI">🤖 AI</button>
   </nav>
@@ -41,13 +42,24 @@
         <div class="panel-acts">
           <span id="favCount" style="font-size:11px;color:var(--t3);font-family:var(--mono)"></span>
           <button class="btn btn-g btn-xs btn-star" id="favToggle" onclick="ListView.toggleStarOnly()">⭐ 收藏</button>
-          <button class="btn btn-g btn-xs" onclick="RouteRegistry.dispatch('refresh-data')">⟳ 刷新</button>
+          <button class="btn btn-g btn-xs" onclick="RouteRegistry.dispatch('refresh-data')">⟳ 刷新行情(全量)</button>
         </div>
       </div>
       <div class="row">
         <input type="text" id="searchInput" placeholder="🔍 搜索合约名称或代码…" oninput="ListView.renderList()">
-        <button class="btn btn-p" id="loadBtn" onclick="RouteRegistry.dispatch('load-data')">📂 载入行情</button>
+        <button class="btn btn-p" id="loadBtn" onclick="RouteRegistry.dispatch('load-data')">📂 载入行情(缓存优先)</button>
       </div>
+      <div class="row" style="align-items:center">
+        <input type="text" id="incrCodes" placeholder="增量更新K线：合约代码，逗号分隔（如 agm,sc0,m0）" style="flex:2">
+        <select id="incrPeriod" style="flex:0 0 110px">
+          <option value="101,240,60">日/4H/60分</option>
+          <option value="101">日线</option>
+          <option value="240">4小时</option>
+          <option value="60">60分</option>
+        </select>
+        <button class="btn btn-p" id="incrBtn" onclick="ListView.incrementalUpdate()">⤓ 增量更新</button>
+      </div>
+      <div class="note" id="incrStatus"><span>🔒 不自动联网：所有拉取都要手动点按钮。增量=只补新K线，旧数据不删不动。</span></div>
       <div id="favBar" class="chips" style="display:none"></div>
       <div id="quoteContainer"><div class="note"><span class="spin"></span>正在加载…</div></div>
     </div>
@@ -60,12 +72,14 @@
         <div class="panel-title" id="detailTitle">K线详情</div>
         <div class="panel-acts">
           <button class="btn btn-g btn-xs" onclick="RouteRegistry.dispatch('back-to-list')">← 返回</button>
-          <button class="btn btn-g btn-xs" onclick="DetailView.loadChart(currentCode,currentPeriod,true)">⟳ 刷新</button>
+          <button class="btn btn-g btn-xs" onclick="DetailView.loadChart(currentCode,currentPeriod,false)">⟳ 读取缓存</button>
+          <button class="btn btn-p btn-xs" onclick="DetailView.pullKline()">⤓ 拉取K线(增量)</button>
         </div>
       </div>
       <div id="priceMatrix" class="matrix"></div>
       <div class="row" id="periodBar" style="gap:4px"></div>
       <div id="indBar" class="note"></div>
+      <div class="note" id="detailStatus"></div>
       <div id="chart" style="width:100%;height:340px;background:var(--s2);border-radius:var(--r-sm)"></div>
       <div class="panel-title" style="margin:14px 0 6px">成交量</div>
       <div id="volChart" style="width:100%;height:72px;background:var(--s2);border-radius:var(--r-sm)"></div>
@@ -103,6 +117,26 @@
       <div id="screenResult" style="display:none"></div>
       <div class="note">首次运行需在行情页载入数据；评分口径 EMA30+MACD25+RSI20+KDJ15+ATR10</div>
     </div>
+    <div class="panel">
+      <div class="panel-hd">
+        <div class="panel-title">策略对比（可放 2 / 3 / 4 … N 套）</div>
+        <div class="panel-acts">
+          <button class="btn btn-g btn-xs" onclick="RouteRegistry.dispatch('compare-run')">▶ 对比回测</button>
+        </div>
+      </div>
+      <div class="row">
+        <input type="text" id="cmpCode" placeholder="对比用合约代码，如 agm" style="flex:2">
+        <select id="cmpPeriod" style="flex:0 0 110px">
+          <option value="101">日线</option>
+          <option value="240">4小时</option>
+          <option value="60">60分</option>
+        </select>
+        <input type="number" id="cmpLimit" value="300" placeholder="K线数" style="flex:0 0 90px">
+      </div>
+      <div class="cmp-list" id="cmpList"></div>
+      <div class="note" id="cmpStatus"><span>点「＋ 添加一套策略」可无限增加；对比结果会标出每项谁更好。</span></div>
+      <div id="cmpResult"></div>
+    </div>
   </section>
 
   <!-- 回测 -->
@@ -131,6 +165,50 @@
       <div id="btResult"></div>
       <div id="btChart" style="width:100%;height:180px;background:var(--s2);border-radius:var(--r-sm);margin-top:12px"></div>
       <div class="note" id="btStatus"></div>
+    </div>
+  </section>
+
+  <!-- 模拟盘 -->
+  <section class="view off" id="vSim">
+    <div class="panel">
+      <div class="panel-hd">
+        <div class="panel-title">模拟期货盘（真实数据 · 本地不联网下单）</div>
+        <div class="panel-acts">
+          <button class="btn btn-g btn-xs" onclick="RouteRegistry.dispatch('sim-run')">▶ 按策略执行</button>
+          <button class="btn btn-d btn-xs" onclick="RouteRegistry.dispatch('sim-reset')">↺ 重置模拟盘</button>
+        </div>
+      </div>
+      <div class="row">
+        <input type="text" id="simCode" placeholder="合约代码，如 agm" style="flex:2">
+        <select id="simPeriod" style="flex:0 0 100px">
+          <option value="101">日线</option>
+          <option value="240">4小时</option>
+          <option value="60">60分</option>
+          <option value="30">30分</option>
+          <option value="15">15分</option>
+        </select>
+        <input type="date" id="simDate" style="flex:0 0 150px" title="模拟截止日期（只推演到该日期）">
+        <label class="note" style="margin:0;display:flex;align-items:center;gap:5px">
+          <input type="checkbox" id="simLatest" checked style="width:auto;flex:none"> 用最新日期
+        </label>
+      </div>
+      <div class="row">
+        <select id="simStrategy" style="flex:2"><option value="">— 选择要执行的策略 —</option></select>
+        <input type="number" id="simQty" value="1" min="1" placeholder="手数" style="flex:0 0 80px">
+        <button class="btn btn-p" id="simBuyBtn" onclick="SimView.manualOrder('BUY')">▲ 买入</button>
+        <button class="btn btn-d" id="simSellBtn" onclick="SimView.manualOrder('SELL')">▼ 卖出</button>
+        <button class="btn btn-g" onclick="SimView.closeOrder()">平仓</button>
+      </div>
+      <div class="note" id="simStatus"><span>数据来自本地缓存（不自动联网）；缺K线请先在详情页「⤓ 拉取K线(增量)」。</span></div>
+      <div class="sim-pos" id="simPos"></div>
+      <div id="simChart" style="width:100%;height:360px;background:var(--s2);border-radius:var(--r-sm)"></div>
+      <div class="legend">
+        <i class="mk-buy">▲ 买入点</i>
+        <i class="mk-sell">▼ 卖出点</i>
+        <i style="color:var(--brand)">— 权益曲线（虚线）</i>
+      </div>
+      <div class="panel-title" style="margin:14px 0 6px">成交记录</div>
+      <div id="simTrades" class="note">尚无成交</div>
     </div>
   </section>
 
@@ -203,12 +281,15 @@
 <script src="js/backtest.js"></script>
 <script src="js/router.js"></script>
 <script src="js/api.js"></script>
-<script src="js/views/list.js?v=2"></script>
-<script src="js/views/detail.js?v=2"></script>
-<script src="js/views/strategy.js?v=2"></script>
-<script src="js/views/backtest.js?v=2"></script>
-<script src="js/views/monitor.js?v=2"></script>
-<script src="js/views/ai.js?v=2"></script>
-<script src="js/app.js?v=2"></script>
+<script src="js/views/list.js?v=3"></script>
+<script src="js/views/detail.js?v=3"></script>
+<script src="js/views/strategy.js?v=3"></script>
+<script src="js/views/strategy-compare.js?v=3"></script>
+<script src="js/views/backtest.js?v=3"></script>
+<script src="js/sim.js?v=3"></script>
+<script src="js/views/sim.js?v=3"></script>
+<script src="js/views/monitor.js?v=3"></script>
+<script src="js/views/ai.js?v=3"></script>
+<script src="js/app.js?v=3"></script>
 </body>
 </html>

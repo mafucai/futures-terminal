@@ -71,14 +71,26 @@
       if (USE_HTTP) return httpReq(`/api/kline?code=${encodeURIComponent(code)}&period=${period}&limit=${limit || 200}`);
       return (async () => {
         const p = period || BT_PERIOD;
-        let klines = SCR.readKlineCache(code, p);
-        if (!klines || klines.length < 20) {
-          klines = await WD.futureKline(code, p, limit || 200);
-          if (klines && klines.length) SCR.cacheKline(code, p, klines);
+        // 只读本地缓存：**不主动联网**。无缓存时明确提示，由用户点「拉取K线」手动更新。
+        const klines = SCR.readKlineCache(code, p);
+        if (!klines || !klines.length) {
+          throw new Error('本地暂无该周期K线，请点「⟳ 拉取K线」手动更新（不自动联网）');
         }
-        if (!klines || !klines.length) throw new Error('无K线数据');
         const indicators = window.Indicators ? window.Indicators.calculateAll(klines) : {};
         return { code, period: p, count: klines.length, klines, indicators };
+      })();
+    },
+
+    /* 3b. 手动拉取 / 增量更新单合约单周期K线（唯一允许联网的K线入口） */
+    klineUpdate(code, period, limit) {
+      if (USE_HTTP) return httpReq(`/api/kline?code=${encodeURIComponent(code)}&period=${period}&limit=${limit || 300}&refresh=1`);
+      return (async () => {
+        const p = period || BT_PERIOD;
+        const r = await SCR.updateKlineIncremental(code, p, limit || 300);
+        if (!r.ok) throw new Error('该合约该周期暂无数据');
+        const klines = SCR.readKlineCache(code, p) || [];
+        const indicators = window.Indicators ? window.Indicators.calculateAll(klines) : {};
+        return { code, period: p, count: klines.length, added: r.added, updated: r.updated, total: r.total, klines, indicators };
       })();
     },
 
@@ -86,6 +98,16 @@
     getStrategy() {
       if (USE_HTTP) return httpReq('/api/strategy');
       return Promise.resolve({ code: getStrategy() });
+    },
+
+    /* 4b. 策略库：主策略 + 对比页保存的多套策略（供模拟盘/对比选择） */
+    listStrategies() {
+      const out = [{ id: 'main', name: '主策略（编辑器）', code: getStrategy() }];
+      try {
+        const arr = JSON.parse(localStorage.getItem('fv2_cmp_strategies') || '[]');
+        arr.forEach((s, i) => out.push({ id: s.id || ('cmp' + i), name: s.name || ('策略 ' + (i + 1)), code: s.code || '' }));
+      } catch (e) { /* ignore */ }
+      return Promise.resolve({ strategies: out });
     },
     saveStrategy(code) {
       if (USE_HTTP) return httpReq('/api/strategy', { method: 'POST', body: { code } });
@@ -152,14 +174,35 @@
         const BT = window.Backtest;
         if (!BT) throw new Error('回测模块未加载');
         if (multi) {
-          const k4h = SCR.readKlineCache(code, 240) || await WD.futureKline(code, 240, limit);
-          const k1h = SCR.readKlineCache(code, 60) || await WD.futureKline(code, 60, limit);
-          if (!k4h || !k1h) throw new Error('多周期数据不足');
+          // 只读缓存，不主动联网；缺数据请先在详情页「⟳ 拉取K线」
+          const k4h = SCR.readKlineCache(code, 240);
+          const k1h = SCR.readKlineCache(code, 60);
+          if (!k4h || !k1h) throw new Error('本地缺 4H/60分 缓存，请先在 K线详情页手动「⟳ 拉取K线」');
           return BT.runMultiPeriodBacktest(k4h, k1h, code_);
         }
-        const kl = SCR.readKlineCache(code, period) || await WD.futureKline(code, period, limit);
-        if (!kl || !kl.length) throw new Error('无K线数据');
+        const kl = SCR.readKlineCache(code, period);
+        if (!kl || !kl.length) throw new Error('本地无该周期K线，请先在 K线详情页手动「⟳ 拉取K线」');
         return BT.runBacktest(kl, code_);
+      })();
+    },
+
+    /* 7b. 用「指定的策略文本」回测（策略对比用；仍只读本地缓存，不联网） */
+    backtestWith(strategyCode, body) {
+      if (USE_HTTP) return httpReq('/api/backtest', { method: 'POST', body: Object.assign({ strategy: strategyCode }, body) });
+      return (async () => {
+        const { code, period = BT_PERIOD, multi = false, limit = 200 } = body || {};
+        if (!strategyCode || !String(strategyCode).trim()) throw new Error('该策略为空');
+        const BT = window.Backtest;
+        if (!BT) throw new Error('回测模块未加载');
+        if (multi) {
+          const k4h = SCR.readKlineCache(code, 240);
+          const k1h = SCR.readKlineCache(code, 60);
+          if (!k4h || !k1h) throw new Error('本地缺 4H/60分 缓存');
+          return BT.runMultiPeriodBacktest(k4h, k1h, strategyCode);
+        }
+        const kl = SCR.readKlineCache(code, period);
+        if (!kl || !kl.length) throw new Error('本地无该周期K线（请先拉取）');
+        return BT.runBacktest(kl, strategyCode);
       })();
     },
 
@@ -187,6 +230,41 @@
     health() {
       if (USE_HTTP) return httpReq('/api/health');
       return Promise.resolve({ ok: true, mode: 'local-app', bridge: hasBridge(), scoring: !!SCORING });
+    },
+
+    /* 10b. 增量更新一批合约的K线（唯一批量联网入口，必须用户手动触发）
+       语义：对每个 code × period，拉最新K线并与本地缓存**合并**（旧数据不删不动，只补新增）。
+       返回：{ ok, total, done, added, updated, failed:[...], items:[...] }，onProgress 回调可用于进度条。 */
+    async incrementalUpdate(codes, periods, onProgress) {
+      const list = (codes || []).filter(Boolean);
+      const ps = (periods && periods.length) ? periods : [101, 240, 60];
+      const items = [];
+      let done = 0, added = 0, updated = 0;
+      const failed = [];
+      const total = list.length * ps.length;
+      for (const code of list) {
+        for (const p of ps) {
+          try {
+            const r = await SCR.updateKlineIncremental(code, p, 300);
+            if (r.ok) { added += r.added; updated += r.updated; items.push(r); }
+            else failed.push(`${code}/${p}`);
+          } catch (e) {
+            failed.push(`${code}/${p}:${e.message}`);
+          }
+          done++;
+          if (typeof onProgress === 'function') onProgress(done, total, code, p);
+        }
+      }
+      // 记录最近一次增量更新时间（供界面显示）
+      try { localStorage.setItem('fv2_last_update', new Date().toISOString()); } catch (e) { /* ignore */ }
+      return { ok: true, total, done, added, updated, failed, items, at: new Date().toISOString() };
+    },
+
+    /* 10c. 记录/读取最近一次「行情列表」更新时间 */
+    lastUpdate() {
+      let t = null;
+      try { t = localStorage.getItem('fv2_last_update'); } catch (e) { /* ignore */ }
+      return Promise.resolve({ at: t });
     },
 
     /* ═══ AI（走原生桥 httpPost；无桥则明确报错，不静默） ═══ */

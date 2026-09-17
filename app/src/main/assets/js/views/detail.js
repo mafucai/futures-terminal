@@ -107,23 +107,51 @@
     const title = document.getElementById('detailTitle');
     if (title) title.textContent = `K线详情 · ${code}`;
     renderPeriodBar();
-    UI.status('正在加载K线…', 'warn');
+    const dst = document.getElementById('detailStatus');
+    UI.status('正在读取K线缓存…', 'warn');
     try {
       const data = await API.kline(code, period, 200);
       const klines = Array.isArray(data) ? data : (data?.klines || data?.data || []);
       const ind = data?.indicators || {};
-      if (!klines.length) throw new Error('无K线数据（缓存为空，先运行增量更新）');
+      if (!klines.length) throw new Error('无K线数据（缓存为空）');
       renderMatrix(klines[klines.length - 1] || {}, ind);
       drawCharts(klines, ind);
-      UI.status(`${code} · ${klines.length} 根K线`, '');
+      if (dst) dst.innerHTML = `<span>📦 本地缓存 ${klines.length} 根 · 末根 ${UI.esc(klines[klines.length - 1].time || '--')}（不自动联网）</span>`;
+      UI.status(`${code} · ${klines.length} 根K线（缓存）`, '');
     } catch (err) {
       UI.status('K线加载失败：' + err.message, 'err');
+      if (dst) dst.innerHTML = `<span style="color:var(--warn)">${UI.esc(err.message)}</span>`;
       const box = document.getElementById('chart');
       if (box) box.innerHTML = `<div class="blank"><div class="em">⚠️</div><div class="tx">${UI.esc(err.message)}</div></div>`;
     }
   }
 
-  window.DetailView = { open, loadChart };
+  /* 手动「拉取K线」：联网拉最新，与缓存增量合并（旧数据不删不动） */
+  async function pullKline() {
+    const code = window.currentCode, period = window.currentPeriod;
+    if (!code) return;
+    const dst = document.getElementById('detailStatus');
+    const btn = document.querySelector('#vDetail .btn-p');
+    if (btn) btn.disabled = true;
+    if (dst) dst.innerHTML = '<span class="spin"></span>正在联网拉取并增量合并…';
+    UI.status('正在拉取K线（增量）…', 'warn');
+    try {
+      const r = await API.klineUpdate(code, period, 300);
+      const klines = r.klines || [];
+      if (!klines.length) throw new Error('该合约该周期暂无数据');
+      renderMatrix(klines[klines.length - 1] || {}, r.indicators || {});
+      drawCharts(klines, r.indicators || {});
+      if (dst) dst.innerHTML = `<span>✅ 增量完成：新增 ${r.added} 根 · 末根更新 ${r.updated} 次 · 共 ${r.total} 根（旧数据保留）</span>`;
+      UI.status(`增量完成 · 新增 ${r.added} 根`, '');
+    } catch (err) {
+      if (dst) dst.innerHTML = `<span style="color:var(--danger)">拉取失败：${UI.esc(err.message)}</span>`;
+      UI.status('拉取失败：' + err.message, 'err');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  window.DetailView = { open, loadChart, pullKline };
 
   RouteRegistry.registerPage('vDetail', { onEnter: () => { charts.main?.resize(); charts.vol?.resize(); charts.macd?.resize(); } });
   window.addEventListener('resize', () => { charts.main?.resize(); charts.vol?.resize(); charts.macd?.resize(); });

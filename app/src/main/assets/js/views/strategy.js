@@ -81,13 +81,19 @@
     });
   }
 
-  window.StrategyView = { loadStrategy, saveStrategy, runScreen };
+  function onEnter() {
+    const ta = document.getElementById('strategyEditor');
+    if (ta && !ta.value) loadStrategy();
+    // 策略对比：进入页面时刷新策略列表（动态 ＋ 号卡片）
+    if (window.StrategyCompareView && typeof StrategyCompareView.enter === 'function') {
+      try { StrategyCompareView.enter(); } catch (e) { /* 不阻断 */ }
+    }
+  }
+
+  window.StrategyView = { loadStrategy, saveStrategy, runScreen, onEnter };
 
   RouteRegistry.register('load-strategy', loadStrategy);
   RouteRegistry.register('save-strategy', saveStrategy);
   RouteRegistry.register('run-screen', runScreen);
-  RouteRegistry.registerPage('vStrategy', { onEnter: () => {
-    const ta = document.getElementById('strategyEditor');
-    if (ta && !ta.value) loadStrategy();
-  }});
+  RouteRegistry.registerPage('vStrategy', { onEnter });
 })();

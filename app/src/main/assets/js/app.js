@@ -78,7 +78,7 @@
 
     const pageMap = {
       vList: 'List', vDetail: 'Detail', vStrategy: 'Strategy',
-      vBacktest: 'Backtest', vMonitor: 'Monitor', vAI: 'AI'
+      vBacktest: 'Backtest', vSim: 'Sim', vMonitor: 'Monitor', vAI: 'AI'
     };
     Object.keys(pageMap).forEach(id => {
       RouteRegistry.registerPage(id, {

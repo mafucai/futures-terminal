@@ -98,8 +98,9 @@
     const box = document.getElementById('quoteContainer');
     const btn = document.getElementById('loadBtn');
     if (btn) btn.disabled = true;
-    UI.status('正在获取行情…', 'warn');
-    box.innerHTML = '<div class="note"><span class="spin"></span>正在获取行情…</div>';
+    // 手动触发：refresh=true 才联网拉全量；否则优先读本地缓存（不自动联网）
+    UI.status(refresh ? '正在联网刷新全量行情…' : '正在读取行情缓存…', 'warn');
+    box.innerHTML = `<div class="note"><span class="spin"></span>${refresh ? '正在联网刷新全量行情…' : '正在读取本地缓存…'}</div>`;
     try {
       const data = await API.futuresAll(refresh);
       // 兼容后端三种形态：数组 / {list:[...]} / {data:{code:info}} 映射
@@ -118,7 +119,7 @@
         time: it.time ?? it.timestamp ?? it.updatedAt
       })).filter(x => x.code);
       STATE.loaded = true;
-      UI.status(`行情就绪 · ${STATE.all.length} 个合约`, '');
+      UI.status(`行情就绪 · ${STATE.all.length} 个合约${refresh ? '（已联网刷新）' : '（来自缓存）'}`, '');
       renderList();
     } catch (err) {
       UI.status('行情获取失败：' + err.message, 'err');
@@ -128,7 +129,38 @@
     }
   }
 
-  window.ListView = { renderList, loadData, toggleStar, toggleStarOnly, STATE };
+  /* 手动「增量更新」：只补新K线，旧数据不删不动（唯一批量联网入口） */
+  async function incrementalUpdate() {
+    const raw = (document.getElementById('incrCodes')?.value || '').trim();
+    const periods = (document.getElementById('incrPeriod')?.value || '101,240,60')
+      .split(',').map(s => Number(s.trim())).filter(Boolean);
+    const st = document.getElementById('incrStatus');
+    const btn = document.getElementById('incrBtn');
+    if (!raw) {
+      if (st) st.innerHTML = '<span style="color:var(--warn)">请先填写要增量更新的合约代码（逗号分隔）</span>';
+      return;
+    }
+    const codes = raw.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+    if (btn) btn.disabled = true;
+    if (st) st.innerHTML = '<span class="spin"></span>正在增量更新（只补新K线）…';
+    UI.status('增量更新中…', 'warn');
+    try {
+      const r = await API.incrementalUpdate(codes, periods, (done, total, code, p) => {
+        if (st) st.innerHTML = `<span class="spin"></span>进度 ${done}/${total}（${UI.esc(code)} ${p}）…`;
+      });
+      if (st) st.innerHTML = `✅ 完成：新增 ${r.added} 根 · 更新末根 ${r.updated} 次 · 共 ${r.total} 项`
+        + (r.failed.length ? ` · <span style="color:var(--warn)">${r.failed.length} 项无数据</span>` : '')
+        + `（旧数据保留，未删除）`;
+      UI.status(`增量更新完成 · 新增 ${r.added} 根`, '');
+    } catch (err) {
+      if (st) st.innerHTML = `<span style="color:var(--danger)">增量更新失败：${UI.esc(err.message)}</span>`;
+      UI.status('增量更新失败：' + err.message, 'err');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  window.ListView = { renderList, loadData, incrementalUpdate, toggleStar, toggleStarOnly, STATE };
 
   RouteRegistry.register('load-data', () => loadData(false));
   RouteRegistry.register('refresh-data', () => loadData(true));

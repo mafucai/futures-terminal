@@ -24,6 +24,77 @@ window.Screener = (function () {
     const d = Store.load(`${code}_${period}`);
     return d ? d.klines : null;
   }
+  function readKlineMeta(code, period) {
+    return Store.load(`${code}_${period}`);
+  }
+
+  /* ── 增量合并（核心）：已有的不动、不删，只把"新"K线补进来 ──
+     规则：
+       1. 以 time 为唯一键；旧缓存里已有的时间点一律保留（不删除）。
+       2. 只有 incoming 中时间 > 旧缓存最后一个时间 的，才算"新数据"，追加到末尾。
+       3. 相同时间点若 incoming 有更新值（例如当天未收盘K线在刷新后变化），
+          只覆盖最后一个时间点的值，不改动更早的历史。
+     返回：{ merged, added, updated, kept } —— 便于前端显示"本次新增 N 根"。
+  */
+  function mergeKline(oldKlines, incoming, opts) {
+    const keepHistory = !opts || opts.keepHistory !== false;
+    const oldArr = Array.isArray(oldKlines) ? oldKlines.slice() : [];
+    const inc = Array.isArray(incoming) ? incoming.filter(k => k && k.time) : [];
+    if (!oldArr.length) {
+      return { merged: inc.slice(), added: inc.length, updated: 0, kept: 0 };
+    }
+    if (!inc.length) {
+      return { merged: oldArr, added: 0, updated: 0, kept: oldArr.length };
+    }
+
+    const timeOf = k => String(k && k.time || '');
+    const oldLastTime = timeOf(oldArr[oldArr.length - 1]);
+    const indexByTime = new Map();
+    oldArr.forEach((k, i) => indexByTime.set(timeOf(k), i));
+
+    let added = 0, updated = 0;
+    for (const k of inc) {
+      const t = timeOf(k);
+      if (indexByTime.has(t)) {
+        // 相同时间：仅当是最后一个时间点且数值变化时才覆盖（未收盘K线刷新）
+        const i = indexByTime.get(t);
+        if (i === oldArr.length - 1 && t === oldLastTime) {
+          const prev = oldArr[i];
+          if (Number(prev.close) !== Number(k.close) || Number(prev.high) !== Number(k.high) ||
+              Number(prev.low) !== Number(k.low) || Number(prev.volume) !== Number(k.volume)) {
+            oldArr[i] = k;
+            updated++;
+          }
+        }
+        // 更早的相同时间点：保持旧值不动
+        continue;
+      }
+      if (t > oldLastTime) {
+        oldArr.push(k);
+        indexByTime.set(t, oldArr.length - 1);
+        added++;
+      }
+      // 比旧缓存最后一个时间更早、但缓存里没有的点（历史空档）：
+      //   keepHistory=true 时也补进来，保证历史尽量完整，且不覆盖任何已有数据。
+      else if (keepHistory) {
+        oldArr.push(k);
+        indexByTime.set(t, oldArr.length - 1);
+        added++;
+      }
+    }
+    // 追加的空档点可能打乱顺序：按时间稳定排序（已有数据内容不变，仅重排）
+    oldArr.sort((a, b) => timeOf(a).localeCompare(timeOf(b)));
+    return { merged: oldArr, added, updated, kept: oldArr.length - added };
+  }
+
+  /* 增量更新：拉最新K线，与缓存合并后写回。返回统计。 */
+  async function updateKlineIncremental(code, period, limit, name) {
+    const fresh = await WD.futureKline(code, period, limit || 300);
+    const old = readKlineCache(code, period);
+    const r = mergeKline(old, fresh);
+    if (r.merged.length) cacheKline(code, period, r.merged, name);
+    return { code, period, added: r.added, updated: r.updated, total: r.merged.length, ok: r.merged.length > 0 };
+  }
   function getContracts(mainOnly = false) {
     const d = Store.loadFutures();
     if (!d || !d.data) return [];
@@ -131,7 +202,10 @@ window.Screener = (function () {
       if ((!klines || klines.length < minBars) && liveFetch) {
         try {
           klines = await WD.futureKline(contract.code, period, 100);
-          if (klines && klines.length >= minBars) { cacheKline(contract.code, period, klines, contract.name); fetched++; }
+          if (klines && klines.length >= minBars) {
+            klines = mergeKline(readKlineCache(contract.code, period), klines).merged;
+            cacheKline(contract.code, period, klines, contract.name); fetched++;
+          }
           else klines = null;
         } catch (e) { klines = null; }
       }
@@ -182,13 +256,19 @@ window.Screener = (function () {
       if ((!k4h || k4h.length < minBars) && liveFetch) {
         try {
           k4h = await WD.futureKline(contract.code, 240, 100);
-          if (k4h && k4h.length >= minBars) cacheKline(contract.code, 240, k4h, contract.name); else k4h = null;
+          if (k4h && k4h.length >= minBars) {
+            k4h = mergeKline(readKlineCache(contract.code, 240), k4h).merged;
+            cacheKline(contract.code, 240, k4h, contract.name);
+          } else k4h = null;
         } catch (e) { k4h = null; }
       }
       if ((!k1h || k1h.length < minBars) && liveFetch) {
         try {
           k1h = await WD.futureKline(contract.code, 60, 100);
-          if (k1h && k1h.length >= minBars) cacheKline(contract.code, 60, k1h, contract.name); else k1h = null;
+          if (k1h && k1h.length >= minBars) {
+            k1h = mergeKline(readKlineCache(contract.code, 60), k1h).merged;
+            cacheKline(contract.code, 60, k1h, contract.name);
+          } else k1h = null;
         } catch (e) { k1h = null; }
       }
       if (k4h && k1h) fetched++;
@@ -231,5 +311,5 @@ window.Screener = (function () {
     })));
   }
 
-  return { screenWithCode, screenMultiPeriod, scoreEma26, scoreAll, Store, cacheKline, readKlineCache, getContracts };
+  return { screenWithCode, screenMultiPeriod, scoreEma26, scoreAll, Store, cacheKline, readKlineCache, readKlineMeta, mergeKline, updateKlineIncremental, getContracts };
 })();
