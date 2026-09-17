@@ -12,6 +12,7 @@
 |---|---|---|
 | **项目总览** | `README.md` | 架构 / 结构 / 功能 / 评分 / AI（2026-09-16 校准为纯前端 App） |
 | **完整交接文档** | `docs/HANDOFF.md` | v1.0.x 时代交接（Node 后端口径，**历史参考**） |
+| **同花顺数据对接** | `docs/HITHINK-FUYAO.md` | 期货**合约乘数/保证金/手续费**来源；接口契约 + 安全约定（不含真实 Key） |
 | 本索引 | `docs/DOCS_INDEX.md` | 项目内文档导航 |
 
 > ⚠️ `docs/HANDOFF.md` 描述的是**旧的 Node 后端架构**（`server/*.js` + `.node-install`），
@@ -45,6 +46,7 @@
 | **api-relay-tester**（RelayScope） | `docs/RELAYSCOPE-APP-SPEC.md`（统一规格 v2.0）；`docs/ENGINEERING.md`；**`docs/archive/v2-progressive-memory/`（渐进式记忆 v2 设计存档）+ `v3-progressive-memory/README.md`** |
 | **PureProbe**（活跃 v0.3.0） | 治理四件套（`PROJECT_RULES.md`/`RISK_CHECKLIST.md`/`ACCEPTANCE.md`/`LOW_MODEL_TASK_TEMPLATE.md`）；`docs/{ARCHITECTURE,DELIVERY-REPORT,memory-pureprobe-archived}.md`；`scripts/{gen_icon.py,preflight.py}` |
 | **futures-terminal**（本项目） | `README.md`；`docs/HANDOFF.md`；`docs/DOCS_INDEX.md` |
+| ↳ 同花顺数据 | `docs/HITHINK-FUYAO.md`（合约乘数来源） |
 
 ### PureProbe 已知不一致
 

@@ -81,7 +81,8 @@ futures-terminal/
 │   └── AndroidManifest.xml
 ├── docs/
 │   ├── HANDOFF.md                 ← 完整交接文档
-│   └── DOCS_INDEX.md              ← 文档索引
+│   ├── DOCS_INDEX.md              ← 文档索引
+│   └── HITHINK-FUYAO.md           ← 同花顺数据对接（合约乘数）
 └── .github/workflows/apk.yml      ← APK 云端构建
 ```
 
@@ -105,14 +106,21 @@ futures-terminal/
 ## 6. 数据源（关键结论）
 
 ### ✅ 可用
-| 数据源 | 域名 | 日K | 分钟K |
-|---|---|---|---|
-| **新浪主源** | `stock2.finance.sina.com.cn` | ✅ | ✅ |
-| **新浪备用** | `stock.finance.sina.com.cn` | ✅ | ✅ |
-| 东财行情列表 | `push2.eastmoney.com` | - | - |
+| 数据源 | 域名 | 日K | 分钟K | 合约规格* |
+|---|---|---|---|---|
+| **新浪主源** | `stock2.finance.sina.com.cn` | ✅ | ✅ | ❌ |
+| **新浪备用** | `stock.finance.sina.com.cn` | ✅ | ✅ | ❌ |
+| 东财行情列表 | `push2.eastmoney.com` | - | - | ❌ |
+| **同花顺 fuyao** | `fuyao.aicubes.cn` | ✅ | ❌ | ✅ |
+
+> \* 合约规格 = **合约乘数 / 保证金率 / 手续费 / 最小变动价位**。
+> **新浪没有这些字段**（实测确认），由**同花顺**提供（需 API Key，免费注册）。详见 [`docs/HITHINK-FUYAO.md`](docs/HITHINK-FUYAO.md)。
 
 ### ❌ 不可用
-东财 push2his（被封）、同花顺（404）、腾讯（接口改版）、网易（502）、雪球（需登录）、百度（仅 agm）、通达信 TCP（协议未调通）
+东财 push2his（被封）、腾讯（接口改版）、网易（502）、雪球（需登录）、百度（仅 agm）、通达信 TCP（协议未调通）
+
+> 📌 **修正历史结论**：早期记录「同花顺 404」是**旧版股票接口**的判断，**已过时**。
+> 同花顺官方新服务 `fuyao.aicubes.cn` **可用**，且是**唯一提供期货合约乘数的来源**。
 
 ### 🚀 重大发现
 **新浪 K 线不封 IP** —— 965 合约 17 秒拉完 811 个（84%），无限速。
@@ -228,6 +236,24 @@ module.exports.onBar = function (kline, ctx) {
 策略页顶部有 **「📄 载入示例(多周期)」/「📄 示例(单周期)」** 两个按钮，一键把可运行的
 JS 示例填进编辑器（多周期示例即 4H EMA26 定方向 + 1H EMA26 入场 + ATR 过滤 + 前3根确认 + 阴阳线）。
 
+## 9f. 合约规格数据（同花顺 · 合约乘数）
+
+策略算手数/成本需要 **合约乘数、保证金率、手续费**——**新浪没有这些字段**（实测确认）。
+来源改为 **同花顺 fuyao**（免费注册 API Key）：
+
+```
+GET https://fuyao.aicubes.cn/api/futures/varieties/list
+Header: X-api-key: <KEY>     # 仅存本机 localStorage['fv2_hithink_key']
+```
+
+实测返回 **91 个品种**，每项含 `contract_multiplier`（乘数）、`margin_rate`（保证金）、
+`transaction_fee`/`transaction_fee_rate`（手续费，两种计法）、`tick_size`、`has_night_session`。
+
+**数据分工**：合约规格 ← 同花顺；4H/1H 分钟K ← 新浪（同花顺**不提供分钟K**）。
+完整接口契约 + 安全约定见 [`docs/HITHINK-FUYAO.md`](docs/HITHINK-FUYAO.md)。
+
+**安全**：API Key 只存本机 `localStorage`，界面/日志脱敏，**绝不写入代码或提交到 Git**。
+
 ## 10. 关键坑
 
 1. **WebView 缓存旧 JS** —— 前端 JS 加版本号 `?v=N`，改代码后必须更新
@@ -258,6 +284,7 @@ JS 示例填进编辑器（多周期示例即 4H EMA26 定方向 + 1H EMA26 入�
 |---|---|
 | 完整交接文档 | `docs/HANDOFF.md` |
 | 文档索引 | `docs/DOCS_INDEX.md` |
+| **同花顺数据对接（合约乘数）** | `docs/HITHINK-FUYAO.md` |
 | 全局索引（本机） | `/workspace/inbox/INDEX_ALL.md` |
 
 ---
