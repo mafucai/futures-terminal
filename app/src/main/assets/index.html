@@ -102,6 +102,7 @@
         <div class="panel-title">策略编辑器</div>
         <div class="panel-acts">
           <button class="btn btn-g btn-xs" onclick="RouteRegistry.dispatch('load-strategy')">读取</button>
+          <button class="btn btn-g btn-xs" onclick="StrategyView.loadExample('EMA26_CORRECTED')">📄 载入修正版(推荐)</button>
           <button class="btn btn-g btn-xs" onclick="StrategyView.loadExample('EMA26_MULTI')">📄 载入示例(多周期)</button>
           <button class="btn btn-g btn-xs" onclick="StrategyView.loadExample('EMA_CROSS')">📄 示例(单周期)</button>
           <button class="btn btn-p btn-xs" onclick="RouteRegistry.dispatch('save-strategy')">💾 保存</button>
@@ -145,6 +146,21 @@
       <div class="cmp-list" id="cmpList"></div>
       <div class="note" id="cmpStatus"><span>点「＋ 添加一套策略」可无限增加；对比结果会标出每项谁更好。</span></div>
       <div id="cmpResult"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-hd">
+        <div class="panel-title">合约规格（同花顺 · 乘数/保证金/手续费）</div>
+        <div class="panel-acts">
+          <button class="btn btn-p btn-xs" onclick="SpecsView.refresh()">⟳ 从同花顺刷新乘数</button>
+          <button class="btn btn-g btn-xs" onclick="SpecsView.show('agm')">🔍 查一个</button>
+        </div>
+      </div>
+      <div class="row">
+        <input type="password" id="specKey" placeholder="同花顺 API Key（仅存本机，不入库）" style="flex:2">
+        <button class="btn btn-g" onclick="SpecsView.saveKey()">💾 保存 Key</button>
+      </div>
+      <div class="note" id="specStatus"><span>🔒 Key 仅存本机 localStorage，界面/日志脱敏。无 Key 时用内置兜底表。</span></div>
+      <div id="specTable"></div>
     </div>
   </section>
 
@@ -209,6 +225,12 @@
         <button class="btn btn-d" id="simSellBtn" onclick="SimView.manualOrder('SELL')">▼ 卖出</button>
         <button class="btn btn-g" onclick="SimView.closeOrder()">平仓</button>
         <button class="btn btn-g" onclick="SimView.runAll()">▶ 对比模拟（全部策略）</button>
+      </div>
+      <div class="note" style="margin-bottom:8px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="simRisk" style="width:auto;flex:none"> 风险模式（手数 = 资金×0.5% ÷ 止损距离×乘数；需策略设置 ctx.stopLoss）
+        </label>
+        <span id="simSpecInfo"></span>
       </div>
       <div id="simAllResult"></div>
       <div class="note" id="simStatus"><span>数据来自本地缓存（不自动联网）；缺K线请先在详情页「⤓ 拉取K线(增量)」。</span></div>
@@ -290,6 +312,7 @@
 <script src="js/webdata.js"></script>
 <script src="js/strategy-runner.js"></script>
 <script src="js/strategy-templates.js"></script>
+<script src="js/specs.js"></script>
 <script src="js/screener.js"></script>
 <script src="js/backtest.js"></script>
 <script src="js/router.js"></script>
@@ -298,6 +321,7 @@
 <script src="js/views/detail.js?v=3"></script>
 <script src="js/views/strategy.js?v=3"></script>
 <script src="js/views/strategy-compare.js?v=3"></script>
+<script src="js/views/specs.js?v=3"></script>
 <script src="js/views/backtest.js?v=3"></script>
 <script src="js/sim.js?v=3"></script>
 <script src="js/views/sim.js?v=3"></script>

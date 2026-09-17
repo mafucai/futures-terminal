@@ -173,16 +173,17 @@
         if (!code_.trim()) throw new Error('未保存策略，无法回测');
         const BT = window.Backtest;
         if (!BT) throw new Error('回测模块未加载');
+        const spec = window.Specs ? Specs.get(code) : null;
         if (multi) {
           // 只读缓存，不主动联网；缺数据请先在详情页「⟳ 拉取K线」
           const k4h = SCR.readKlineCache(code, 240);
           const k1h = SCR.readKlineCache(code, 60);
           if (!k4h || !k1h) throw new Error('本地缺 4H/60分 缓存，请先在 K线详情页手动「⟳ 拉取K线」');
-          return BT.runMultiPeriodBacktest(k4h, k1h, code_);
+          return BT.runMultiPeriodBacktest(k4h, k1h, code_, { spec });
         }
         const kl = SCR.readKlineCache(code, period);
         if (!kl || !kl.length) throw new Error('本地无该周期K线，请先在 K线详情页手动「⟳ 拉取K线」');
-        return BT.runBacktest(kl, code_);
+        return BT.runBacktest(kl, code_, { spec });
       })();
     },
 
@@ -194,15 +195,16 @@
         if (!strategyCode || !String(strategyCode).trim()) throw new Error('该策略为空');
         const BT = window.Backtest;
         if (!BT) throw new Error('回测模块未加载');
+        const spec = window.Specs ? Specs.get(code) : null;
         if (multi) {
           const k4h = SCR.readKlineCache(code, 240);
           const k1h = SCR.readKlineCache(code, 60);
           if (!k4h || !k1h) throw new Error('本地缺 4H/60分 缓存');
-          return BT.runMultiPeriodBacktest(k4h, k1h, strategyCode);
+          return BT.runMultiPeriodBacktest(k4h, k1h, strategyCode, { spec });
         }
         const kl = SCR.readKlineCache(code, period);
         if (!kl || !kl.length) throw new Error('本地无该周期K线（请先拉取）');
-        return BT.runBacktest(kl, strategyCode);
+        return BT.runBacktest(kl, strategyCode, { spec });
       })();
     },
 

@@ -175,6 +175,76 @@ public class MainActivity extends Activity {
         }
 
         /**
+         * GET with arbitrary extra headers supplied as a flat JSON object,
+         * e.g. {@code {"X-api-key":"sk-..."}}. Needed by data providers that
+         * authenticate via a custom header (同花顺 fuyao uses {@code X-api-key}),
+         * because the simple {@link #httpGet} cannot set arbitrary headers.
+         *
+         * @param url         fully-qualified http(s) URL
+         * @param headersJson flat JSON object of extra headers, or null
+         * @return response body, or a string prefixed with {@code __ERR__} on failure
+         */
+        @JavascriptInterface
+        public String httpGetWithHeadersJson(String url, String headersJson) {
+            return requestWithHeaders(url, headersJson, StandardCharsets.UTF_8);
+        }
+
+        /**
+         * Shared synchronous GET supporting arbitrary extra headers.
+         * Mirrors {@link #request} error conventions ({@code __ERR__}-prefixed
+         * string, never throws into JS). Extra headers are parsed with the same
+         * minimal parser used by {@link #requestWithBody}.
+         */
+        private String requestWithHeaders(String url, String headersJson, Charset charset) {
+            if (url == null || url.isEmpty()) return "__ERR__empty url";
+            HttpURLConnection conn = null;
+            try {
+                URL u = new URL(url);
+                conn = (HttpURLConnection) u.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                conn.setReadTimeout(READ_TIMEOUT_MS);
+                conn.setInstanceFollowRedirects(true);
+                conn.setRequestProperty("User-Agent", DEFAULT_UA);
+                conn.setRequestProperty("Referer", DEFAULT_REFERER);
+                conn.setRequestProperty("Accept", "*/*");
+                conn.setRequestProperty("Accept-Encoding", "identity");
+                applyHeaders(conn, headersJson);
+
+                int code = conn.getResponseCode();
+                InputStream in = (code >= 200 && code < 400) ? conn.getInputStream() : conn.getErrorStream();
+                if (in == null) return "__ERR__no response body (http " + code + ")";
+                String body = readFully(in, charset);
+                in.close();
+                if (code < 200 || code >= 400) {
+                    String snippet = body == null ? "" : body.replaceAll("\\s+", " ");
+                    if (snippet.length() > 300) snippet = snippet.substring(0, 300);
+                    return "__ERR__http " + code + (snippet.isEmpty() ? "" : " " + snippet);
+                }
+                return body;
+            } catch (Exception e) {
+                String msg = e.getMessage();
+                return "__ERR__" + (msg == null ? e.getClass().getSimpleName() : msg);
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+        }
+
+        /** 极简扁平 headers JSON 解析并写入连接（避免引入第三方库）。 */
+        private void applyHeaders(HttpURLConnection conn, String headersJson) {
+            if (headersJson == null || headersJson.trim().length() <= 2) return;
+            String h = headersJson.trim();
+            if (h.startsWith("{") && h.endsWith("}")) h = h.substring(1, h.length() - 1);
+            for (String pair : h.split(",")) {
+                int idx = pair.indexOf(':');
+                if (idx <= 0) continue;
+                String key = pair.substring(0, idx).trim().replaceAll("^[\"']+|[\"']+$", "");
+                String val = pair.substring(idx + 1).trim().replaceAll("^[\"']+|[\"']+$", "");
+                if (!key.isEmpty()) conn.setRequestProperty(key, val);
+            }
+        }
+
+        /**
          * POST a JSON body to a URL and return the response body (UTF-8).
          *
          * <p>Used by the AI analysis feature (OpenAI-compatible endpoints take POST).

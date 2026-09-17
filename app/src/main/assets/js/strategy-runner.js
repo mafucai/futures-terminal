@@ -55,11 +55,18 @@ window.StrategyRunner = (function () {
     return null;
   }
 
-  function createContext({ cash = 100000, code = '' } = {}) {
+  /* 创建策略上下文。
+     ctx.state  —— 策略可读写的持久对象（跨K线保留），例如连亏计数、暂停方向标记。
+     ctx.spec   —— 该合约规格 { multiplier, marginRate, fee, feeRate, tickSize }（来自同花顺/内置表）。
+     ctx.stopLoss —— 策略可设置的硬止损价；引擎会在【盘中 high/low】里判定是否被打到。 */
+  function createContext({ cash = 100000, code = '', spec = null } = {}) {
     return {
-      cash, position: 0, avgPrice: 0,
+      cash, position: 0, avgPrice: 0, entryPrice: 0, barsHeld: 0,
       history: [], signals: [], trades: [],
       equity: [{ cash }], code,
+      state: {},                 // 策略自定义状态（连亏暂停等）
+      spec: spec || null,        // 合约规格
+      stopLoss: null,            // 硬止损价（策略设置，引擎执行）
     };
   }
 

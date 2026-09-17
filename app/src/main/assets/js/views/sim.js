@@ -36,7 +36,8 @@
     const endDate = latest ? 'latest' : (dateVal || '');
     const qty = Math.max(1, Number(document.getElementById('simQty')?.value || 1));
     const stratId = document.getElementById('simStrategy')?.value || '';
-    return { code, period, endDate, qty, stratId, latest, dateVal };
+    const riskMode = document.getElementById('simRisk')?.checked || false;
+    return { code, period, endDate, qty, stratId, latest, dateVal, riskMode };
   }
 
   /* 载入本地缓存的K线（不联网）；返回 true/false */
@@ -186,7 +187,7 @@
   /* ── 按策略执行 ── */
   async function run() {
     const st = document.getElementById('simStatus');
-    const { code, period, endDate, qty, stratId, latest, dateVal } = readInputs();
+    const { code, period, endDate, qty, stratId, latest, dateVal, riskMode } = readInputs();
     if (!code) { if (st) st.innerHTML = '<span style="color:var(--warn)">请先填写合约代码</span>'; return; }
     if (!loadKlines(code, period)) {
       if (st) st.innerHTML = `<span style="color:var(--warn)">本地无 ${UI.esc(code)} ${period} 缓存，请先在 K线详情页「⤓ 拉取K线(增量)」</span>`;
@@ -199,7 +200,8 @@
     if (st) st.innerHTML = '<span class="spin"></span>按策略推演中…';
     UI.status('模拟盘执行中…', 'warn');
     try {
-      const r = await SimEngine.runStrategy(klines, code_, endDate, { qty, code, period });
+      const spec = window.Specs ? Specs.get(code) : null;
+      const r = await SimEngine.runStrategy(klines, code_, endDate, { qty, code, period, spec, riskMode });
       acc = r.account;
       persist();
       refreshAll();
@@ -263,7 +265,7 @@
   async function runAll() {
     const st = document.getElementById('simStatus');
     const out = document.getElementById('simAllResult');
-    const { code, period, endDate, qty } = readInputs();
+    const { code, period, endDate, qty, riskMode } = readInputs();
     if (!code) { if (st) st.innerHTML = '<span style="color:var(--warn)">请先填写合约代码</span>'; return; }
     if (!loadKlines(code, period)) {
       if (st) st.innerHTML = `<span style="color:var(--warn)">本地无 ${UI.esc(code)} ${period} 缓存，请先拉取K线</span>`;
@@ -276,9 +278,10 @@
       const valid = r.strategies.filter(s => (s.code || '').trim());
       if (!valid.length) throw new Error('没有可用策略（请先在策略页编写并保存）');
       const rows = [];
+      const spec = window.Specs ? Specs.get(code) : null;
       for (const s of valid) {
         try {
-          const sim = await SimEngine.runStrategy(klines, s.code, endDate, { qty, code, period });
+          const sim = await SimEngine.runStrategy(klines, s.code, endDate, { qty, code, period, spec, riskMode });
           const sum = SimEngine.summary(sim.account, klines[sim.account.lastIndex >= 0 ? sim.account.lastIndex : klines.length - 1].close);
           rows.push({ name: s.name || s.id, ok: true, sum, marks: sim.account.marks });
         } catch (e) {
@@ -346,8 +349,21 @@
         const has = Array.from(pInp.options).some(o => Number(o.value) === window.currentPeriod);
         if (has) pInp.value = String(window.currentPeriod);
       }
+      updateSpecInfo();
+      const codeInp2 = document.getElementById('simCode');
+      if (codeInp2) codeInp2.addEventListener('change', updateSpecInfo);
       chart?.resize();
     }
   });
+
+  function updateSpecInfo() {
+    const el = document.getElementById('simSpecInfo');
+    const code = (document.getElementById('simCode')?.value || '').trim();
+    if (!el) return;
+    if (!code || !window.Specs) { el.textContent = ''; return; }
+    const s = Specs.get(code);
+    el.innerHTML = `　规格：乘数 <b style="color:var(--t1)">${s.multiplier}</b> · 保证金 ${(s.marginRate * 100).toFixed(0)}% · 费 ${s.fee || 0}元/手${s.feeRate ? ' + ' + (s.feeRate * 10000).toFixed(1) + '‱' : ''} · <span style="color:var(--t3)">${UI.esc(s.source)}</span>`;
+  }
+  window.SimView.updateSpecInfo = updateSpecInfo;
   window.addEventListener('resize', () => chart?.resize());
 })();

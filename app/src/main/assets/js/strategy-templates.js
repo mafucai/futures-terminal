@@ -120,5 +120,88 @@ module.exports.onBar = function (kline, ctx) {
 };
 `;
 
-  return { EMA26_MULTI, EMA_CROSS };
+  /* ── EMA26 修正版（忠实还原用户完整规则）──
+     4H EMA26 定方向；1H EMA26 入场 + 1.5×ATR14 + 前3根确认 + 阴阳线
+     初始硬止损 = 开仓价 ∓ 1.5×1H ATR14（引擎盘中判定，跳空按开盘认亏）
+     1H 反向穿 EMA26 → 减仓 1/3（REDUCE）；4H 反向穿 EMA26 → 清仓（CLOSE）
+     连续 3 次硬止损 → 暂停该方向，等 4H 趋势重新确认再开
+     手数：勾选「风险模式」由引擎按 资金×0.5% ÷（止损距离×乘数）计算
+  */
+  const EMA26_CORRECTED = [
+    '// ═══ EMA26 修正版策略（JavaScript · 忠实还原）═══',
+    '// 建议：回测/模拟盘勾选【多周期(4H+1H)】+【风险模式】；合约规格自动用同花顺乘数。',
+    'module.exports.onBar = function (kline, ctx) {',
+    '  function ema(arr, n) { if (arr.length < n) return null; var k = 2 / (n + 1), e = arr[0]; for (var i = 1; i < arr.length; i++) e = arr[i] * k + e * (1 - k); return e; }',
+    '  function emaAt(arr, n, off) { return ema(off ? arr.slice(0, arr.length - off) : arr, n); }',
+    '  function atr(bars, n) {',
+    '    if (bars.length < n + 1) return null; var trs = [];',
+    '    for (var i = 1; i < bars.length; i++) { var h = bars[i].high, l = bars[i].low, pc = bars[i - 1].close; trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc))); }',
+    '    var k = 2 / (n + 1), a = trs[0]; for (var j = 1; j < trs.length; j++) a = trs[j] * k + a * (1 - k); return a;',
+    '  }',
+    '',
+    '  ctx.state.longLoss = ctx.state.longLoss || 0;',
+    '  ctx.state.shortLoss = ctx.state.shortLoss || 0;',
+    '  ctx.state.longPaused = ctx.state.longPaused || false;',
+    '  ctx.state.shortPaused = ctx.state.shortPaused || false;',
+    '  ctx.state.lastDir = ctx.state.lastDir || 0;',
+    '  if (ctx.lastExit) {',
+    "    if (ctx.lastExit.reason === '硬止损') {",
+    '      if (ctx.state.lastDir > 0) { ctx.state.longLoss++; if (ctx.state.longLoss >= 3) ctx.state.longPaused = true; }',
+    '      else if (ctx.state.lastDir < 0) { ctx.state.shortLoss++; if (ctx.state.shortLoss >= 3) ctx.state.shortPaused = true; }',
+    "    } else if (ctx.lastExit.reason === 'CLOSE') {",
+    '      if (ctx.state.lastDir > 0) ctx.state.longLoss = 0;',
+    '      if (ctx.state.lastDir < 0) ctx.state.shortLoss = 0;',
+    '    }',
+    '  }',
+    '  var hist = ctx.history || [];',
+    "  var bars4 = hist.filter(function (b) { return b.period === '4H'; });",
+    "  var bars1 = hist.filter(function (b) { return b.period !== '4H'; });",
+    '  if (!bars4.length) bars4 = bars1;',
+    '  if (bars1.length < 26 || bars4.length < 26) return null;',
+    '  var c1 = bars1.map(function (b) { return b.close; });',
+    '  var c4 = bars4.map(function (b) { return b.close; });',
+    '  var e1 = ema(c1, 26), e4 = ema(c4, 26), a14 = atr(bars1, 14);',
+    '  if (e1 == null || e4 == null || a14 == null) return null;',
+    '  var close4 = c4[c4.length - 1];',
+    '  var longDir = close4 > e4, shortDir = close4 < e4;',
+    '  var dirNow = longDir ? 1 : (shortDir ? -1 : 0);',
+    '  if (dirNow !== ctx.state.lastDir) {',
+    '    if (dirNow > 0) { ctx.state.longPaused = false; ctx.state.longLoss = 0; }',
+    '    if (dirNow < 0) { ctx.state.shortPaused = false; ctx.state.shortLoss = 0; }',
+    '  }',
+    '  ctx.state.lastDir = dirNow;',
+    '  var c = c1[c1.length - 1], o = bars1[bars1.length - 1].open;',
+    '  var p1 = c1[c1.length - 2], p2 = c1[c1.length - 3], p3 = c1[c1.length - 4];',
+    '  var e1p = emaAt(c1, 26, 1), e2p = emaAt(c1, 26, 2), e3p = emaAt(c1, 26, 3);',
+    '  if (p3 == null || e3p == null) return null;',
+    '  var below3 = (p1 < e1p) && (p2 < e2p) && (p3 < e3p);',
+    '  var above3 = (p1 > e1p) && (p2 > e2p) && (p3 > e3p);',
+    '  if (ctx.position > 0) {',
+    "    if (c < e1) return { type: 'REDUCE', ratio: 1 / 3, reason: '1H跌破EMA26 → 减仓1/3' };",
+    '    return null;',
+    '  }',
+    '  if (ctx.position < 0) {',
+    "    if (c > e1) return { type: 'REDUCE', ratio: 1 / 3, reason: '1H升破EMA26 → 减仓1/3' };",
+    '    return null;',
+    '  }',
+    '  if (longDir && !ctx.state.longPaused) {',
+    '    var near = (c - e1) <= 1.5 * a14;',
+    '    if (c >= e1 && near && below3 && c > o) {',
+    '      ctx.stopLoss = c - 1.5 * a14;',
+    "      return { type: 'BUY', reason: '做多 4H多头+1H(1.5ATR/前3根/阳线) 止损' + (c - 1.5 * a14).toFixed(1) };",
+    '    }',
+    '  }',
+    '  if (shortDir && !ctx.state.shortPaused) {',
+    '    var near2 = (e1 - c) <= 1.5 * a14;',
+    '    if (c <= e1 && near2 && above3 && c < o) {',
+    '      ctx.stopLoss = c + 1.5 * a14;',
+    "      return { type: 'SELL', reason: '做空 4H空头+1H(1.5ATR/前3根/阴线) 止损' + (c + 1.5 * a14).toFixed(1) };",
+    '    }',
+    '  }',
+    '  return null;',
+    '};',
+    ''
+  ].join('\n');
+
+  return { EMA26_MULTI, EMA_CROSS, EMA26_CORRECTED };
 })();
