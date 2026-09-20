@@ -269,16 +269,46 @@
       return Promise.resolve({ at: t });
     },
 
-    /* 10d. 一键增量更新【全部合约】：合约清单取自本地 futures 缓存（不联网）。
-       仅当本地没有合约清单时才提示先「载入行情」。all=true 时含非主连。 */
-    async incrementalUpdateAll(periods, onProgress, opts) {
+    /* 10d. 从本地合约清单选择主连或全部合约。 */
+    _cachedCodes(opts) {
       const onlyMain = !(opts && opts.all);
       const fut = SCR.Store.loadFutures();
       if (!fut || !fut.data) throw new Error('本地还没有合约清单，请先点「📂 载入行情」');
       let codes = Object.keys(fut.data);
-      if (onlyMain) codes = codes.filter(c => /m$/.test(c)); // 主连
-      if (!codes.length) throw new Error('本地合约清单为空');
+      if (onlyMain) codes = codes.filter(c => /m$/i.test(c));
+      if (!codes.length) throw new Error(onlyMain ? '本地合约清单中没有主连合约' : '本地合约清单为空');
+      return codes;
+    },
+
+    /* 一键增量更新：拉最近 300 根并合并，旧数据不删。 */
+    async incrementalUpdateAll(periods, onProgress, opts) {
+      const codes = this._cachedCodes(opts);
       return this.incrementalUpdate(codes, periods, onProgress);
+    },
+
+    /* 一键全量历史：日线 1000 根，4H/60分各 500 根，覆盖对应缓存。 */
+    async fullHistoryAll(periods, onProgress, opts) {
+      const codes = this._cachedCodes(opts);
+      const ps = (periods && periods.length) ? periods : [101];
+      const limits = { 101: 1000, 240: 500, 60: 500 };
+      const items = [], failed = [];
+      let done = 0, bars = 0;
+      const total = codes.length * ps.length;
+      for (const code of codes) {
+        for (const p of ps) {
+          try {
+            const r = await SCR.updateKlineFull(code, p, limits[p] || 500);
+            if (r.ok) { bars += r.total; items.push(r); }
+            else failed.push(`${code}/${p}`);
+          } catch (e) {
+            failed.push(`${code}/${p}:${e.message}`);
+          }
+          done++;
+          if (typeof onProgress === 'function') onProgress(done, total, code, p);
+        }
+      }
+      try { localStorage.setItem('fv2_last_full_update', new Date().toISOString()); } catch (e) { /* ignore */ }
+      return { ok: true, total, done, bars, failed, items, mode: 'full', at: new Date().toISOString() };
     },
 
     /* ═══ AI（走原生桥 httpPost；无桥则明确报错，不静默） ═══ */

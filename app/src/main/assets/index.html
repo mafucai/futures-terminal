@@ -49,24 +49,25 @@
         <input type="text" id="searchInput" placeholder="🔍 搜索合约名称或代码…" oninput="ListView.renderList()">
         <button class="btn btn-p" id="loadBtn" onclick="RouteRegistry.dispatch('load-data')">📂 载入行情(缓存优先)</button>
       </div>
-      <div class="row" style="align-items:center">
-        <input type="text" id="incrCodes" placeholder="增量更新K线：合约代码，逗号分隔（如 agm,sc0,m0）" style="flex:2">
-        <select id="incrPeriod" style="flex:0 0 110px">
-          <option value="101,240,60">日/4H/60分</option>
-          <option value="101">日线</option>
-          <option value="240">4小时</option>
-          <option value="60">60分</option>
-        </select>
-        <button class="btn btn-p" id="incrBtn" onclick="ListView.incrementalUpdate()">⤓ 增量更新</button>
-        <button class="btn btn-p" id="incrAllBtn" onclick="ListView.incrementalUpdateAll()">⤓ 拉取全部合约</button>
-        <label class="note" style="margin:0;display:flex;align-items:center;gap:5px;flex:0 0 auto">
-          <input type="checkbox" id="incrAllMain" checked style="width:auto;flex:none"> 仅主连
-        </label>
-      </div>
+        <div class="row" style="align-items:center">
+          <input type="text" id="incrCodes" placeholder="指定合约增量：代码用逗号分隔（如 agm,sc0,m0）" style="flex:2">
+          <select id="incrPeriod" style="flex:0 0 110px">
+            <option value="101">日线</option>
+            <option value="240">4小时</option>
+            <option value="60">60分</option>
+            <option value="101,240,60">日/4H/60分</option>
+          </select>
+          <button class="btn btn-p" id="incrBtn" onclick="ListView.incrementalUpdate()">⏱ 指定合约增量</button>
+          <button class="btn btn-p" id="fullAllBtn" onclick="ListView.fullHistoryAll()">📥 拉取全部历史</button>
+          <button class="btn btn-p" id="incrAllBtn" onclick="ListView.incrementalUpdateAll()">⤓ 拉取全部增量</button>
+          <label class="note" style="margin:0;display:flex;align-items:center;gap:5px;flex:0 0 auto">
+            <input type="checkbox" id="incrAllMain" checked style="width:auto;flex:none"> 仅主连
+          </label>
+        </div>
       <div id="incrProgressWrap" style="display:none;height:8px;background:var(--s2);border-radius:6px;overflow:hidden;margin:0 0 8px">
         <div id="incrProgress" style="height:100%;width:0;background:linear-gradient(90deg,var(--brand),var(--brand-2));transition:width .2s"></div>
       </div>
-      <div class="note" id="incrStatus"><span>🔒 不自动联网：所有拉取都要手动点按钮。增量=只补新K线，旧数据不删不动。</span></div>
+      <div class="note" id="incrStatus"><span>🔒 手动拉取：历史会覆盖对应缓存（日1000/4H500/60分500）；增量只补新K线，旧数据不删。</span></div>
       <div id="favBar" class="chips" style="display:none"></div>
       <div id="quoteContainer"><div class="note"><span class="spin"></span>正在加载…</div></div>
     </div>
@@ -313,11 +314,11 @@
 <script src="js/strategy-runner.js"></script>
 <script src="js/strategy-templates.js"></script>
 <script src="js/specs.js"></script>
-<script src="js/screener.js"></script>
+<script src="js/screener.js?v=4"></script>
 <script src="js/backtest.js"></script>
 <script src="js/router.js"></script>
-<script src="js/api.js"></script>
-<script src="js/views/list.js?v=3"></script>
+<script src="js/api.js?v=4"></script>
+<script src="js/views/list.js?v=4"></script>
 <script src="js/views/detail.js?v=3"></script>
 <script src="js/views/strategy.js?v=3"></script>
 <script src="js/views/strategy-compare.js?v=3"></script>

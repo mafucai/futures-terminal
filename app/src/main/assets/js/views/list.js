@@ -160,21 +160,25 @@
     }
   }
 
-  /* 一键「拉取全部合约」：合约清单来自本地缓存，只对新K线做增量合并 */
-  async function incrementalUpdateAll() {
-    const periods = (document.getElementById('incrPeriod')?.value || '101,240,60')
+  /* 批量任务共用进度展示；mode=full 时覆盖缓存，incremental 时只增不删。 */
+  async function runBulk(mode) {
+    const periods = (document.getElementById('incrPeriod')?.value || '101')
       .split(',').map(s => Number(s.trim())).filter(Boolean);
     const onlyMain = document.getElementById('incrAllMain')?.checked !== false;
     const st = document.getElementById('incrStatus');
-    const btn = document.getElementById('incrAllBtn');
+    const btn = document.getElementById(mode === 'full' ? 'fullAllBtn' : 'incrAllBtn');
+    const other = document.getElementById(mode === 'full' ? 'incrAllBtn' : 'fullAllBtn');
     const wrap = document.getElementById('incrProgressWrap');
     const bar = document.getElementById('incrProgress');
+    const label = mode === 'full' ? '全部历史（覆盖）' : '全部增量（只增不删）';
     const t0 = Date.now();
     if (btn) btn.disabled = true;
+    if (other) other.disabled = true;
     if (wrap) wrap.style.display = 'block';
-    UI.status('正在拉取全部合约（增量）…', 'warn');
+    UI.status(`正在拉取${label}…`, 'warn');
     try {
-      const r = await API.incrementalUpdateAll(periods, (done, total, code, p) => {
+      const fn = mode === 'full' ? API.fullHistoryAll.bind(API) : API.incrementalUpdateAll.bind(API);
+      const r = await fn(periods, (done, total, code, p) => {
         const pct = total ? Math.round(done / total * 100) : 0;
         if (bar) bar.style.width = pct + '%';
         const elapsed = (Date.now() - t0) / 1000;
@@ -182,19 +186,26 @@
         if (st) st.innerHTML = `<span class="spin"></span>${done}/${total}（${pct}%）剩余约 ${eta}s · ${UI.esc(code)} ${p}`;
       }, { all: !onlyMain });
       const secs = ((Date.now() - t0) / 1000).toFixed(1);
-      if (st) st.innerHTML = `✅ 全部完成：${secs}s · 新增 ${r.added} 根 · 更新末根 ${r.updated} 次 · 共 ${r.done} 项`
-        + (r.failed.length ? ` · <span style="color:var(--warn)">${r.failed.length} 项无数据</span>` : '') + '（旧数据保留）';
-      UI.status(`全量增量完成 · 新增 ${r.added} 根 · ${secs}s`, '');
+      const summary = mode === 'full'
+        ? `覆盖写入 ${r.bars} 根`
+        : `新增 ${r.added} 根 · 更新末根 ${r.updated} 次`;
+      if (st) st.innerHTML = `✅ ${label}完成：${secs}s · ${summary} · 共 ${r.done} 项`
+        + (r.failed.length ? ` · <span style="color:var(--warn)">${r.failed.length} 项失败</span>` : '');
+      UI.status(`${label}完成 · ${secs}s`, '');
     } catch (err) {
-      if (st) st.innerHTML = `<span style="color:var(--danger)">全量增量失败：${UI.esc(err.message)}</span>`;
-      UI.status('全量增量失败：' + err.message, 'err');
+      if (st) st.innerHTML = `<span style="color:var(--danger)">${label}失败：${UI.esc(err.message)}</span>`;
+      UI.status(`${label}失败：` + err.message, 'err');
     } finally {
       if (btn) btn.disabled = false;
+      if (other) other.disabled = false;
       setTimeout(() => { if (wrap) wrap.style.display = 'none'; if (bar) bar.style.width = '0'; }, 1500);
     }
   }
 
-  window.ListView = { renderList, loadData, incrementalUpdate, incrementalUpdateAll, toggleStar, toggleStarOnly, STATE };
+  function fullHistoryAll() { return runBulk('full'); }
+  function incrementalUpdateAll() { return runBulk('incremental'); }
+
+  window.ListView = { renderList, loadData, incrementalUpdate, incrementalUpdateAll, fullHistoryAll, toggleStar, toggleStarOnly, STATE };
 
   RouteRegistry.register('load-data', () => loadData(false));
   RouteRegistry.register('refresh-data', () => loadData(true));

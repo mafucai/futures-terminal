@@ -11,7 +11,10 @@ window.Screener = (function () {
   // ── 本地缓存层（替代 fs 文件缓存） ──
   const Store = {
     _k: 'fv2_kline_', _f: 'fv2_futures',
-    save(k, v) { try { localStorage.setItem(this._k + k, JSON.stringify(v)); } catch (e) {} },
+    save(k, v) {
+      try { localStorage.setItem(this._k + k, JSON.stringify(v)); }
+      catch (e) { throw new Error('K线缓存写入失败（可能是存储空间不足）：' + e.message); }
+    },
     load(k) { try { const s = localStorage.getItem(this._k + k); return s ? JSON.parse(s) : null; } catch (e) { return null; } },
     saveFutures(v) { try { localStorage.setItem(this._f, JSON.stringify(v)); } catch (e) {} },
     loadFutures() { try { const s = localStorage.getItem(this._f); return s ? JSON.parse(s) : null; } catch (e) { return null; } },
@@ -94,6 +97,13 @@ window.Screener = (function () {
     const r = mergeKline(old, fresh);
     if (r.merged.length) cacheKline(code, period, r.merged, name);
     return { code, period, added: r.added, updated: r.updated, total: r.merged.length, ok: r.merged.length > 0 };
+  }
+
+  /* 全量历史：拉取指定根数并覆盖对应合约/周期缓存。 */
+  async function updateKlineFull(code, period, limit, name) {
+    const fresh = await WD.futureKline(code, period, limit);
+    if (fresh.length) cacheKline(code, period, fresh, name);
+    return { code, period, total: fresh.length, mode: 'full', ok: fresh.length > 0 };
   }
   function getContracts(mainOnly = false) {
     const d = Store.loadFutures();
@@ -311,5 +321,5 @@ window.Screener = (function () {
     })));
   }
 
-  return { screenWithCode, screenMultiPeriod, scoreEma26, scoreAll, Store, cacheKline, readKlineCache, readKlineMeta, mergeKline, updateKlineIncremental, getContracts };
+  return { screenWithCode, screenMultiPeriod, scoreEma26, scoreAll, Store, cacheKline, readKlineCache, readKlineMeta, mergeKline, updateKlineIncremental, updateKlineFull, getContracts };
 })();
