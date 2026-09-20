@@ -4,6 +4,7 @@
 > 架构：**WebView + 原生桥**（零第三方依赖、完全离线）
 > 编译：GitHub Actions 云端（`.github/workflows/apk.yml`，推 `master` 触发）
 > 应用 ID：`com.mafucai.futuresterminal`
+> 固定签名：已启用；任何 AI 修改构建前必须先读 [`docs/ANDROID_SIGNING.md`](docs/ANDROID_SIGNING.md)，禁止重新生成签名替换现有密钥。
 
 ---
 
