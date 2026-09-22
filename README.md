@@ -44,6 +44,62 @@
 
 ## 3. 编译与安装
 
+### 🤖 AI 自动化推送流程（推荐）
+
+**只需一步**：告诉 AI 你想更新代码，AI 会自动完成所有技术工作。
+
+#### 完整流程说明
+
+| 步骤 | 执行者 | 操作 | 状态 |
+|------|--------|------|------|
+| 1️⃣ | **AI** | 生成新 SSH 密钥对 (`id_ed25519`) | ✅ 已完成 |
+| 2️⃣ | **AI** | 配置 Git remote 使用 SSH URL | ✅ 已完成 |
+| 3️⃣ | **AI** | 读取公钥内容供你复制 | ✅ 已完成 |
+| 4️⃣ | **你** | GitHub → Settings → SSH Keys → New SSH Key | 🔧 需首次完成 |
+| 5️⃣ | **AI** | `git push origin master` 触发构建 | ✅ 随时可推 |
+
+#### 📋 首次设置（仅需一次）
+
+1. **运行此命令获取公钥**：
+   ```bash
+   cat /home/coomi/.ssh/id_ed25519.pub
+   ```
+   
+2. **输出示例**：
+   ```
+   ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFyt/gKXa4J4J5y75k84qXYUoLOLb1+ajHe882MncLVP futures-terminal
+   ```
+   
+3. **添加到 GitHub**：
+   - 访问：https://github.com/settings/keys
+   - 点击 "New SSH key"
+   - Title: `futures-terminal`
+   - Key: 粘贴上面的公钥
+   - 保存 ✅
+
+#### 🚀 日常使用（AI 全包）
+
+从此以后，你只需要说：
+
+> "帮我更新期货终端代码"
+
+AI 会：
+- ✅ 检查本地改动
+- ✅ 备份关键文件
+- ✅ 执行 `git commit` 和 `git push`
+- ✅ 监控 GitHub Actions 构建进度
+- ✅ 告诉你 APK 下载链接
+
+**核心命令**（AI 自动执行）：
+```bash
+cd /workspace/repos/futures-terminal && git push origin master
+```
+
+这会自动触发 `.github/workflows/apk.yml`，完成：
+1. 检出代码 → 编译 APK → 签名 → 上传 Release
+
+---
+
 **不本地编译**——推送到 GitHub 后由 Actions 自动构建：
 
 ```bash
