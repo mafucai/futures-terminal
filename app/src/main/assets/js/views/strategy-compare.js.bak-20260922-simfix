@@ -8,13 +8,8 @@
 (function () {
   'use strict';
 
-  /* 唯一事实源（2026-09-22）：本页不再直接读写 fv2_cmp_strategies —— 那是 StrategyLibrary 的所有权。
-     依赖顺序由 index.html 保证（strategy-library.js 先于本文件），见 docs/CALL-GRAPH.md §3。 */
-  const LIB = window.StrategyLibrary;
-
-// 运行时所有权校验（撞车即炸）
-if (LIB) try { LIB.own('fv2_cmp_strategies', 'views/strategy-compare'); } catch (e) { console.error('[StrategyCompare]', e); }
-
+  const KEY = 'fv2_cmp_strategies';
+  const DEFAULT_STRATEGY = `// 策略契约：module.exports.onBar = function(kline, ctx){ return {type,reason} | null }
 module.exports.onBar = function (kline, ctx) {
   var closes = ctx.history.map(function (k) { return k.close; });
   if (closes.length < 30) return null;
@@ -31,7 +26,10 @@ module.exports.onBar = function (kline, ctx) {
   let strategies = [];
 
   function load() {
-    strategies = LIB ? LIB.getList() : [];
+    try {
+      const raw = localStorage.getItem(KEY);
+      strategies = raw ? JSON.parse(raw) : [];
+    } catch (e) { strategies = []; }
     if (!Array.isArray(strategies) || !strategies.length) {
       strategies = [
         { id: 's1', name: '策略 1', code: DEFAULT_STRATEGY },
@@ -41,7 +39,7 @@ module.exports.onBar = function (kline, ctx) {
     }
   }
   function save() {
-    try { if (LIB) LIB.setList(strategies); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(KEY, JSON.stringify(strategies)); } catch (e) { /* ignore */ }
   }
   function uid() { return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 

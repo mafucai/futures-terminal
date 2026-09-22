@@ -205,7 +205,7 @@
         </div>
       </div>
       <div class="row">
-        <input type="text" id="simCode" placeholder="合约代码，如 agm" style="flex:2" onchange="RouteRegistry.dispatch('sim-code-change')">
+        <input type="text" id="simCode" placeholder="合约代码，如 agm" style="flex:2">
         <select id="simPeriod" style="flex:0 0 100px">
           <option value="101">日线</option>
           <option value="240">4小时</option>
@@ -219,13 +219,13 @@
         </label>
       </div>
       <div class="row">
-        <select id="simStrategy" style="flex:2" onchange="RouteRegistry.dispatch('sim-strategy-change', this.value)"><option value="">— 选择要执行的策略 —</option></select>
-        <button class="btn btn-g" onclick="RouteRegistry.dispatch('sim-refresh-strategies')">⟳ 刷新策略</button>
+        <select id="simStrategy" style="flex:2"><option value="">— 选择要执行的策略 —</option></select>
+        <button class="btn btn-g" onclick="SimView.loadStrategies()">⟳ 刷新策略</button>
         <input type="number" id="simQty" value="1" min="1" placeholder="手数" style="flex:0 0 80px">
-        <button class="btn btn-p" id="simBuyBtn" onclick="RouteRegistry.dispatch('sim-buy')">▲ 买入</button>
-        <button class="btn btn-d" id="simSellBtn" onclick="RouteRegistry.dispatch('sim-sell')">▼ 卖出</button>
-        <button class="btn btn-g" onclick="RouteRegistry.dispatch('sim-close')">平仓</button>
-        <button class="btn btn-g" onclick="RouteRegistry.dispatch('sim-run-all')">▶ 对比模拟（全部策略）</button>
+        <button class="btn btn-p" id="simBuyBtn" onclick="SimView.manualOrder('BUY')">▲ 买入</button>
+        <button class="btn btn-d" id="simSellBtn" onclick="SimView.manualOrder('SELL')">▼ 卖出</button>
+        <button class="btn btn-g" onclick="SimView.closeOrder()">平仓</button>
+        <button class="btn btn-g" onclick="SimView.runAll()">▶ 对比模拟（全部策略）</button>
       </div>
       <div class="note" style="margin-bottom:8px">
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
@@ -311,7 +311,6 @@
 <script src="js/indicators.js"></script>
 <script src="js/scoring.js"></script>
 <script src="js/webdata.js"></script>
-<script src="js/strategy-library.js"></script>
 <script src="js/strategy-runner.js"></script>
 <script src="js/strategy-templates.js"></script>
 <script src="js/specs.js"></script>
@@ -322,14 +321,13 @@
 <script src="js/views/list.js?v=4"></script>
 <script src="js/views/detail.js?v=3"></script>
 <script src="js/views/strategy.js?v=3"></script>
-<script src="js/views/strategy-compare.js?v=4"></script>
+<script src="js/views/strategy-compare.js?v=3"></script>
 <script src="js/views/specs.js?v=3"></script>
 <script src="js/views/backtest.js?v=3"></script>
 <script src="js/sim.js?v=3"></script>
-<script src="js/views/sim-render.js?v=1"></script>
-<script src="js/views/sim.js?v=4"></script>
+<script src="js/views/sim.js?v=3"></script>
 <script src="js/views/monitor.js?v=3"></script>
 <script src="js/views/ai.js?v=3"></script>
-<script src="js/app.js?v=4"></script>
+<script src="js/app.js?v=3"></script>
 </body>
 </html>

@@ -11,10 +11,6 @@
   /* 唯一事实源（2026-09-22）：本页不再直接读写 fv2_cmp_strategies —— 那是 StrategyLibrary 的所有权。
      依赖顺序由 index.html 保证（strategy-library.js 先于本文件），见 docs/CALL-GRAPH.md §3。 */
   const LIB = window.StrategyLibrary;
-
-// 运行时所有权校验（撞车即炸）
-if (LIB) try { LIB.own('fv2_cmp_strategies', 'views/strategy-compare'); } catch (e) { console.error('[StrategyCompare]', e); }
-
 module.exports.onBar = function (kline, ctx) {
   var closes = ctx.history.map(function (k) { return k.close; });
   if (closes.length < 30) return null;

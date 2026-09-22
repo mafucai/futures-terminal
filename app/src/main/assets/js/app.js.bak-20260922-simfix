@@ -76,9 +76,18 @@
     tickClock();
     setInterval(tickClock, 1000);
 
-    /* 移除（2026-09-22）：此处原有 pageMap 统一注册，会整体覆盖各视图自己注册的 onEnter
-       （见 router.js registerPage 的修复说明）。各视图均已自行 registerPage，这里不再重复注册，
-       避免 StrategyView.onEnter 之类被调用两次。 */
+    const pageMap = {
+      vList: 'List', vDetail: 'Detail', vStrategy: 'Strategy',
+      vBacktest: 'Backtest', vSim: 'Sim', vMonitor: 'Monitor', vAI: 'AI'
+    };
+    Object.keys(pageMap).forEach(id => {
+      RouteRegistry.registerPage(id, {
+        onEnter: () => {
+          const v = window[pageMap[id] + 'View'];
+          if (v && typeof v.onEnter === 'function') v.onEnter();
+        }
+      });
+    });
 
     RouteRegistry.navigate('vList');
 
