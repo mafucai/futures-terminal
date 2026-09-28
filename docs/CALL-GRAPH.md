@@ -4,7 +4,7 @@
 > 立这份文档的直接触发事件：模拟盘「策略」下拉永远为空 → 跑不了任何策略 → 归因为「策略未接通」，
 > 根因却是中央路由的**注册覆盖**（详见 §5）。这类 bug 靠读单个文件看不出来，**只有蓝图能提前暴露**。
 >
-> 状态：生效中 ｜ 配套可执行自检：`scripts/ui-regression.js`（29 项断言，`node scripts/ui-regression.js`）
+> 状态：生效中 ｜ 配套可执行自检：`scripts/ui-regression.js`（**34 项断言**，`node scripts/ui-regression.js`；已接入 CI，构建前跑，见 `.github/workflows/apk.yml`）
 
 ---
 
@@ -174,7 +174,7 @@ function registerPage(name, opts) {
 
 **提交前必跑：**
 ```bash
-node scripts/ui-regression.js      # 29 项断言，必须 0 失败
+node scripts/ui-regression.js      # 34 项断言，必须 0 失败
 node --check app/src/main/assets/js/views/sim.js   # 逐个改动文件
 ```
 
@@ -190,4 +190,5 @@ node --check app/src/main/assets/js/views/sim.js   # 逐个改动文件
 
 ---
 
-*创建：2026-09-22 ｜ 依据：模拟盘策略链路缺陷复盘 ｜ 回归：`scripts/ui-regression.js` **29 项断言全部通过**（含中央路由、策略链路、模块化阈值三组）*
+*创建：2026-09-22 ｜ 依据：模拟盘策略链路缺陷复盘 ｜ 回归：`scripts/ui-regression.js` **34 项断言全部通过**（含中央路由、策略链路、模块化阈值、own() 校验、全量语法检查五组）*
+*数字校准：2026-09-28 —— 原写「29 项」为不实陈述（脚本当时因重复声明整脚本 SyntaxError，从未运行过）。修复后实测 34 项，详见 `docs/REGRESSION-AUDIT-20260928.md`。*

@@ -143,7 +143,7 @@ futures-terminal/
 │   ├── DOCS_INDEX.md              ← 文档索引
 │   └── HITHINK-FUYAO.md           ← 同花顺数据对接（合约乘数）
 ├── scripts/
-│   └── ui-regression.js           ← 蓝图的可执行断言（24 项，离线跑）
+│   └── ui-regression.js           ← 蓝图的可执行断言（34 项，离线跑；已接入 CI 构建前门禁）
 └── .github/workflows/apk.yml      ← APK 云端构建
 ```
 
