@@ -12,9 +12,14 @@
      依赖顺序由 index.html 保证（strategy-library.js 先于本文件），见 docs/CALL-GRAPH.md §3。 */
   const LIB = window.StrategyLibrary;
 
-// 运行时所有权校验（撞车即炸）
-if (LIB) try { LIB.own('fv2_cmp_strategies', 'views/strategy-compare'); } catch (e) { console.error('[StrategyCompare]', e); }
+  // 运行时所有权校验（撞车即炸）
+  if (LIB) try { LIB.own('fv2_cmp_strategies', 'views/strategy-compare'); } catch (e) { console.error('[StrategyCompare]', e); }
 
+  /* 默认策略示例（模板字符串）。
+     ⚠️ 修复记录 2026-09-28：513a092 提交误删了本行的 `const DEFAULT_STRATEGY = \`` 前缀，
+     只剩孤立的结尾反引号（第 29 行 `};` + 反引号），导致整个文件 SyntaxError，策略对比页无法加载。
+     从 b391477 原始版还原前缀。 */
+  const DEFAULT_STRATEGY = `// 策略契约：module.exports.onBar = function(kline, ctx){ return {type,reason} | null }
 module.exports.onBar = function (kline, ctx) {
   var closes = ctx.history.map(function (k) { return k.close; });
   if (closes.length < 30) return null;

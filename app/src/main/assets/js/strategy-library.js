@@ -109,6 +109,9 @@ window.StrategyLibrary = (function () {
     getMain: getMain, setMain: setMain,
     getList: getList, setList: setList,
     lastId: lastId, remember: remember,
-    notify: notify, onChange: onChange
+    notify: notify, onChange: onChange,
+    own: own            // ← 2026-09-28 补：函数早已定义但从未导出，
+                        //   导致 api.js / views/strategy-compare.js 调用即 TypeError
+                        //   （策略编辑器回填报「StrategyLibrary.own is not a function」）
   };
 })();

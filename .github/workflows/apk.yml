@@ -15,6 +15,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      # ⚠️ 门禁：跑不过就不构建。
+      # 2026-09-28 新增 —— 此前 ui-regression.js 因重复声明整脚本崩溃、从未运行，
+      # 而它只写在文档里「要求人记得跑」，没有任何强制力。此步是让门禁名副其实的关键。
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Regression gate (ui-regression.js)
+        run: node scripts/ui-regression.js
+      - name: Syntax check (all app JS)
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r f; do
+            node --check "$f" || { echo "::error file=$f::语法错误"; fail=1; }
+          done < <(find app/src/main/assets/js -name '*.js' ! -name '*.bak*' ! -name '*.fixed' ! -path '*/lib/*')
+          exit $fail
       - name: Set up Java
         uses: actions/setup-java@v4
         with:

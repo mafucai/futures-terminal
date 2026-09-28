@@ -150,7 +150,16 @@ function ck(name, cond, extra){ (cond?pass++:fail++); console.log((cond?'  ✅ '
   ck('api.js 写策略仅通过 StrategyLibrary.setMain', /StrategyLibrary\.setMain\(code\)/.test(apiCode));
   ck('api.js 读策略仅通过 StrategyLibrary.getMain', /StrategyLibrary\.getMain\(\)/.test(apiCode));
   ck('api.js 已无 STRATEGY_KEY 常量与策略键字面量（无第二事实源）',
-     !/STRATEGY_KEY/.test(apiCode) && !/['"`]fv2_strategy['"`]/.test(apiCode) && !/fv2_cmp_strategies/.test(apiCode));
+     // 2026-09-28 修正：本断言写于 513a092（当时「一个键只能一个所有者」），
+     // 但同一笔提交又给 api.js 加了 own('fv2_strategy', 'api.js:read'/'api.js:write')
+     // —— 该提交自己和自己打架。own() 声明里出现键名是**合法**的（声明 ≠ 读写）。
+     // 故此处先剥掉 own(...) 调用，再扫剩余代码（真读写点）。
+     (() => {
+       const withoutOwn = apiCode.replace(/(?:\w+)\s*\.\s*own\s*\([^)]*\)/g, 'own()');
+       return !/STRATEGY_KEY/.test(withoutOwn)
+           && !/['"`]fv2_strategy['"`]/.test(withoutOwn)
+           && !/fv2_cmp_strategies/.test(withoutOwn);
+     })());
   ck('StrategyLibrary 缺失时 api.js 选择抛错而非静默回退',
      (apiCode.match(/StrategyLibrary 模块未加载/g) || []).length >= 3);
 
@@ -203,11 +212,16 @@ function ck(name, cond, extra){ (cond?pass++:fail++); console.log((cond?'  ✅ '
     'fv2_ai_history': ['api.js']
   };
 
-  /* 去注释后再判所有权：只在**注释里提到**键名不算访问（否则文档性注释会误报） */
+  /* 去注释后判所有权：只在**注释里提到**键名不算访问（否则文档性注释会误报）。
+     2026-09-28 追加：**`own()` 声明里提到键名也不算读写** —— 声明"我独占这个键"
+     与"我在读写这个键"是两件事。此前 api.js / strategy-compare.js 因调用
+     `own('fv2_xxx', ...)` 被误判为违规，属断言过窄（假阳性）。
+     判据：先剥掉 own(...) 调用，再扫剩余代码里的键字面量。 */
   const stripComments = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  const stripOwnDecls = s => s.replace(/(?:StrategyLibrary|LIB|LIBRARY)\s*\.\s*own\s*\([^)]*\)/g, 'own()');
 
   jsFiles.forEach(p => {
-    const src = stripComments(fs.readFileSync(p, 'utf8'));
+    const src = stripOwnDecls(stripComments(fs.readFileSync(p, 'utf8')));
     const rel = path.relative(ASSETS, p);
     Object.keys(SHARED_KEYS).forEach(k => {
       if (src.indexOf("'" + k) < 0 && src.indexOf('"' + k) < 0 && src.indexOf('`' + k) < 0) return;
@@ -218,24 +232,37 @@ function ck(name, cond, extra){ (cond?pass++:fail++); console.log((cond?'  ✅ '
 
   ck('无新文件超阈值（≤400 行且 ≤30KB）', oversized.length === 0, oversized.join(' | ') || `${jsFiles.length} 个文件达标`);
   ck('已知债务文件未继续变大', sizeDebtGrew.length === 0, sizeDebtGrew.join(' | ') || `api.js 仍为 ${SIZE_DEBT['js/api.js']} 行（待拆分）`);
-  // check #1: api.js 有 own() 调用
-ck('api.js 调用了 StrategyLibrary.own()', /StrategyLibrary\.own\([^)]+\)/.test(apiSrc));
-// check #2: strategy-compare.js 有 own() 调用  
-const scSrc = fs.readFileSync(path.join(BASE,'views/strategy-compare.js'),'utf8');
-ck('strategy-compare.js 调用了 StrategyLibrary.own()', /StrategyLibrary\.own\([^)]+\)/.test(scSrc));
-// check #3: strategy-library.js 实现了 own()
-const slSrc = fs.readFileSync(path.join(BASE,'strategy-library.js'),'utf8');
-ck('strategy-library.js 实现了 own() 函数', /function own\(key.*ownerId/.test(slSrc));
 
-// 额外验证：own() 运行时校验已实现
-const slSrc = fs.readFileSync(path.join(BASE,'strategy-library.js'),'utf8');
-const apiSrc = fs.readFileSync(path.join(BASE,'api.js'),'utf8');
-const scSrc = fs.readFileSync(path.join(BASE,'views/strategy-compare.js'),'utf8');
-ck('StrategyLibrary.own() 已实现', /function own\(key.*ownerId/.test(slSrc));
-ck('api.js 调用了 own()', /StrategyLibrary\.own\([^)]+\)/.test(apiSrc));
-ck('strategy-compare.js 调用了 own()', /StrategyLibrary\.own\([^)]+\)/.test(scSrc));
+  /* ── 全量语法检查（2026-09-28 补）──
+     背景：门禁只 `load` 了 14 个文件（视图+基建+数据层），但磁盘上有 24 个 JS。
+     引擎层 10 个（backtest/indicators/monitor/scoring/screener/sim/specs/
+     strategy-runner/strategy-templates/webdata）**从未被加载** ——
+     它们的语法错误门禁一概发现不了（实测：故意写坏 sim.js，门禁仍 33/0 全绿）。
+     故此处对**全部** app JS 做一次 node --check 式的语法校验。 */
+  console.log('\n【全量语法检查】app JS 逐个解析（发现门禁漏检的文件）');
+  const syntaxBad = [];
+  jsFiles.forEach(p => {
+    const rel = path.relative(ASSETS, p);
+    try { new vm.Script(fs.readFileSync(p, 'utf8'), { filename: rel }); }
+    catch (e) { syntaxBad.push(`${rel}: ${e.message.split('\n')[0]}`); }
+  });
+  ck(`全部 ${jsFiles.length} 个 app JS 语法可解析（原先只加载 14 个）`,
+     syntaxBad.length === 0, syntaxBad.join(' | ') || `${jsFiles.length} 个文件全部通过`);
 
-ck('共享存储键只被唯一所有方读写', keyViolation.length === 0, keyViolation.join(' | ') || `${Object.keys(SHARED_KEYS).length} 个共享键所有权清晰`);
+  /* ── own() 运行时校验断言（补于 513a092；2026-09-28 修正重复声明 + 过窄断言）──
+     原实现两处问题：① 重复声明 slSrc/apiSrc/scSrc，整个脚本 SyntaxError，门禁从未运行；
+     ② 正则只认 `StrategyLibrary.own(`，不认 `LIB.own(`（strategy-compare.js 用别名），
+        导致正确的代码被判失败（假阳性）。此处合并声明并放宽正则。 */
+  const scSrc = fs.readFileSync(path.join(BASE, 'views/strategy-compare.js'), 'utf8');
+  const slSrc = fs.readFileSync(path.join(BASE, 'strategy-library.js'), 'utf8');
+  /* 允许 `StrategyLibrary.own(` / `LIB.own(` 等别名写法 */
+  const OWN_CALL = /(?:\w+)\s*\.\s*own\s*\([^)]+\)/;
+  ck('strategy-library.js 实现了 own() 函数', /function own\(key.*ownerId/.test(slSrc));
+  ck('api.js 调用了 own()', OWN_CALL.test(apiSrc));
+  ck('strategy-compare.js 调用了 own()', OWN_CALL.test(scSrc));
+  ck('strategy-library.js 导出了 own（否则调用即 TypeError）', /own\s*:\s*own/.test(slSrc));
+
+  ck('共享存储键只被唯一所有方读写', keyViolation.length === 0, keyViolation.join(' | ') || `${Object.keys(SHARED_KEYS).length} 个共享键所有权清晰`);
 
   console.log('\n══════ 结果：'+pass+' 通过 / '+fail+' 失败 ══════');
   process.exit(fail?1:0);
