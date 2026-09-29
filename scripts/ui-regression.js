@@ -51,14 +51,7 @@ global.window.WebData={}; global.window.Scoring={}; global.window.Backtest={};
 global.window.Specs={ get:()=>({multiplier:10,marginRate:0.1,fee:2,source:'内置'}),
   cachedCount:()=>3, getKey:()=>'', maskKey:()=>'', lastUpdate:()=>null,
   loadAll:()=>({}), BUILTIN:{} };
-global.window.SimEngine={
-  summary:(acc,close)=>({ position:acc.position, initialCash:100000, equity:103500, totalReturn:'3.50%',
-    avgPrice:3600, realized:3500, maxDrawdown:'2.10%', winRate:'60.0%',
-    buys:(acc.marks||[]).filter(m=>m.type==='BUY').length, sells:(acc.marks||[]).filter(m=>m.type==='SELL').length }),
-  runStrategy:async()=>({ account: FAKE_ACCOUNT }),
-  newAccount:()=>({ position:0, marks:[], trades:[], equity:[] , initialCash:100000}),
-  manualOrder:()=>({ok:true}), closePosition:()=>({ok:true})
-};
+global.window.SimEngine_Stub_MOVED = true;   // 见下方「加载后重装桩」
 global.__lastOption = null;
 
 /* ── K线（升序）── */
@@ -67,7 +60,43 @@ for (let i=0;i<20;i++) KLINES.push({ time:'2026-08-'+String(i+1).padStart(2,'0')
 
 const fs=require('fs'), path=require('path'), vm=require('vm');
 const load=f=>vm.runInThisContext(fs.readFileSync(path.join(BASE,f),'utf8'),{filename:f});
-['strategy-library.js','router.js','api.js','views/sim-render.js','views/sim.js','views/list.js','views/strategy-compare.js','views/strategy.js','views/specs.js','views/detail.js','views/backtest.js','views/monitor.js','views/ai.js','app.js'].forEach(load);
+/* 加载顺序以 index.html 为唯一事实源（不手写清单 —— 手写清单在 2026-09-29 之前
+   已漏掉 ai-core.js；这类「随批次增长的手写列表」是同类缺陷的温床）。
+   index.html 里 <script src="js/xxx.js"> 的先后即依赖顺序；lib/ 是第三方，跳过。 */
+const INDEX_HTML = path.join(BASE, '..', 'index.html');
+const scriptOrder = (fs.readFileSync(INDEX_HTML, 'utf8').match(/<script src="([^"]+)"/g) || [])
+  .map(s => s.match(/src="([^"]+)"/)[1].replace(/^js\//, '').replace(/\?.*$/, ''))
+  .filter(p => !p.startsWith('lib/'));
+/* ⚠️ 装桩时机很关键，不能统一在「加载后」：
+   app/src/main/assets/js/sim.js 自建 window.SimEngine，会覆盖桩；
+   而 views/sim.js 在模块顶层执行 `const SR = window.SimEngine`（加载时取一次并缓存）。
+   所以桩必须落在 sim.js 之后、views/sim.js 之前 —— 即「加载到 views/sim.js 前一刻」。
+   （被测对象是 views/sim.js 的控制器逻辑，不是 sim.js 引擎的数值正确性。） */
+const SIMENGINE_STUB = {
+  summary:(acc,close)=>({ position:acc.position, initialCash:100000, equity:103500, totalReturn:'3.50%',
+    avgPrice:3600, realized:3500, maxDrawdown:'2.10%', winRate:'60.0%',
+    buys:(acc.marks||[]).filter(m=>m.type==='BUY').length, sells:(acc.marks||[]).filter(m=>m.type==='SELL').length }),
+  runStrategy:async()=>({ account: FAKE_ACCOUNT }),
+  newAccount:()=>({ position:0, marks:[], trades:[], equity:[] , initialCash:100000}),
+  manualOrder:()=>({ok:true}), closePosition:()=>({ok:true})
+};
+/* 真实 screener.js / specs.js 等也会自建 window.X，覆盖上面的桩。
+   views/sim.js 在模块顶层缓存 `const SR = window.SimEngine`、并在 loadKlines 里用 Screener。
+   所以「消费方加载前一刻」必须把所有被覆盖的桩装回。 */
+const REINSTALL_STUBS = () => {
+  global.window.SimEngine = SIMENGINE_STUB;
+  global.window.Screener = { readKlineCache:()=>KLINES, Store:{_k:'fv2_kline_',loadFutures:()=>null,saveFutures:()=>{}} };
+  global.window.Specs = { get:()=>({multiplier:10,marginRate:0.1,fee:2,source:'内置'}),
+    cachedCount:()=>3, getKey:()=>'', maskKey:()=>'', lastUpdate:()=>null, loadAll:()=>({}), BUILTIN:{} };
+  global.window.StrategyRunner = global.window.StrategyRunner || { createContext:()=>({}), compileStrategy:()=>({}), runStrategy:async()=>null };
+};
+scriptOrder.forEach(f => {
+  if (!fs.existsSync(path.join(BASE, f))) return;   // 仅加载本仓库存在的（跳过 CDN/缺文件）
+  if (f === 'views/sim.js') REINSTALL_STUBS();      // ← 恰在消费方加载前装回被覆盖的桩
+  load(f);
+});
+REINSTALL_STUBS();   // 兜底
+console.log('（脚本加载顺序取自 index.html，共 ' + scriptOrder.length + ' 个；桩已就位）');
 if (global.__dcl) global.__dcl();
 
 const ESC = global.UI.esc;
@@ -182,8 +211,11 @@ function ck(name, cond, extra){ (cond?pass++:fail++); console.log((cond?'  ✅ '
   })(BASE);
 
   /* 已知超阈值债务：只允许它原地存在，不允许再变大（file → 行数上限）。
-     清偿方式见 CALL-GRAPH.md §2.1；清偿后从本表删除。 */
-  const SIZE_DEBT = { 'js/api.js': 461 };
+     清偿方式见 CALL-GRAPH.md §2.1；清偿后从本表删除。
+     2026-09-29：api.js 已拆出 ai-core.js（455 → 370 行），债务清偿，本表清空。
+     注：本表若重新出现条目，键名是 `js/xxx.js`；不写数字上限的「硬编码行数」——
+     那会让断言随文件变化而失真（见 EVOLUTION 规则：易变值不写死）。 */
+  const SIZE_DEBT = {};
 
   const oversized = [], sizeDebtGrew = [], keyViolation = [];
   jsFiles.forEach(p => {
@@ -207,9 +239,16 @@ function ck(name, cond, extra){ (cond?pass++:fail++); console.log((cond?'  ✅ '
     'fv2_kline_': ['screener.js'],
     'fv2_futures': ['screener.js'],
     'ft_stars': ['views/list.js'],
+    // specs.js 系列（注意：fv2_specs_at 是 fv2_specs 的超串，两者都列，归属同一方）
+    'fv2_specs_at': ['specs.js'],
     'fv2_specs': ['specs.js'],
     'fv2_hithink_key': ['specs.js'],
-    'fv2_ai_history': ['api.js']
+    'fv2_ai_history': ['api.js'],
+    // 2026-09-29 补：以下 3 个键此前代码在用、但既不在 CALL-GRAPH §3 表也不在本表，
+    // 导致「共享键唯一读写方」这条规则对它们完全失效。补齐后方可被检查。
+    'fv2_last_full_update': ['api.js'],
+    'fv2_last_update': ['api.js'],
+    'ft_ai_cfg': ['views/ai.js']
   };
 
   /* 去注释后判所有权：只在**注释里提到**键名不算访问（否则文档性注释会误报）。
@@ -231,7 +270,10 @@ function ck(name, cond, extra){ (cond?pass++:fail++); console.log((cond?'  ✅ '
   });
 
   ck('无新文件超阈值（≤400 行且 ≤30KB）', oversized.length === 0, oversized.join(' | ') || `${jsFiles.length} 个文件达标`);
-  ck('已知债务文件未继续变大', sizeDebtGrew.length === 0, sizeDebtGrew.join(' | ') || `api.js 仍为 ${SIZE_DEBT['js/api.js']} 行（待拆分）`);
+  const debtMsg = Object.keys(SIZE_DEBT).length
+    ? Object.keys(SIZE_DEBT).map(k => `${k} 应为 ${SIZE_DEBT[k]} 行`).join(' | ')
+    : '无超阈值债务文件';
+  ck('已知债务文件未继续变大', sizeDebtGrew.length === 0, sizeDebtGrew.join(' | ') || debtMsg);
 
   /* ── 全量语法检查（2026-09-28 补）──
      背景：门禁只 `load` 了 14 个文件（视图+基建+数据层），但磁盘上有 24 个 JS。
@@ -263,6 +305,92 @@ function ck(name, cond, extra){ (cond?pass++:fail++); console.log((cond?'  ✅ '
   ck('strategy-library.js 导出了 own（否则调用即 TypeError）', /own\s*:\s*own/.test(slSrc));
 
   ck('共享存储键只被唯一所有方读写', keyViolation.length === 0, keyViolation.join(' | ') || `${Object.keys(SHARED_KEYS).length} 个共享键所有权清晰`);
+
+  /* ═══ 【2026-09-29 新增】注入防护 / 单函数行数 / 脚本清单一致性 ═══
+     来源：主人要求「按 CALL-GRAPH 分层查错，查出的全部修」。以下断言把
+     这三类问题固化成可回归检查，避免同类再犯。 */
+
+  console.log('\n【注入防护】动态 HTML 不得把值拼进内联事件属性（CALL-GRAPH §4.3）');
+  {
+    /* 反模式：onclick="Fn('${...}')" —— 值参与 JS 字符串拼接。
+       ⚠️ 关键点：UI.esc 转义的是 **HTML 实体**（' → &#39;），但 onclick 是 HTML 属性，
+       浏览器会先把实体解码回 '，于是仍能闭合 JS 字符串 → 实测可注入。
+       （验证脚本见本仓库提交说明；判据：内联事件属性里出现 ${...} 拼接即视为违规。） */
+    const BAD_INLINE = /\bon(?:click|input|change|submit|focus|blur)\s*=\s*"[^"]*\$\{[^}]*\}[^"]*"/g;
+    const offenders = [];
+    jsFiles.forEach(p => {
+      const rel = path.relative(ASSETS, p);
+      const src = stripComments(fs.readFileSync(p, 'utf8'));
+      // 只扫模板字符串/HTML 里的内联事件属性；路由分发的静态字符串不算
+      let m;
+      const re = new RegExp(BAD_INLINE.source, 'g');
+      while ((m = re.exec(src))) {
+        const hit = m[0];
+        // 例外：值本身就是常量字符串（无 ${} 拼接）不会被本正则匹配到
+        offenders.push(`${rel}: ${hit.replace(/\s+/g, ' ').slice(0, 70)}`);
+      }
+    });
+    ck('无内联事件属性里拼接动态值', offenders.length === 0, offenders.join('\n      ') || '0 处拼接（改用 data-* + 事件委托）');
+  }
+
+  console.log('\n【模块化阈值】单函数 ≤60 行（CALL-GRAPH §2.1）');
+  {
+    const longFns = [];
+    jsFiles.forEach(p => {
+      const rel = path.relative(ASSETS, p);
+      const lines = fs.readFileSync(p, 'utf8').split('\n');
+      lines.forEach((l, i) => {
+        const m = l.match(/^(\s*)(?:async\s+)?function\s+(\w+)/);
+        if (!m) return;
+        const indent = m[1].length;
+        let n = 0;
+        for (let j = i + 1; j < lines.length; j++) {
+          const lj = lines[j];
+          if (!lj.trim()) { n++; continue; }
+          if (lj.match(/^(\s*)/)[1].length <= indent) break;
+          n++;
+        }
+        if (n > 60) longFns.push(`${rel} :: ${m[2]}() @L${i + 1} = ${n} 行`);
+      });
+    });
+    ck('无函数超 60 行', longFns.length === 0, longFns.join(' | ') || '全部函数 ≤60 行');
+  }
+
+  console.log('\n【脚本清单一致性】index.html 引入的脚本必须都存在且语法可解析');
+  {
+    const INDEX = path.join(ASSETS, 'index.html');
+    const listed = (fs.readFileSync(INDEX, 'utf8').match(/<script src="([^"]+)"/g) || [])
+      .map(s => s.match(/src="([^"]+)"/)[1].replace(/\?.*$/, ''));
+    const missing = listed.filter(f => !f.startsWith('lib/') && !fs.existsSync(path.join(ASSETS, f)));
+    ck('index.html 列出的脚本全部存在', missing.length === 0, missing.join(' | ') || `${listed.length} 个脚本就位`);
+    // 反向：磁盘上的 app JS 若无任何引入，可能是孤儿文件
+    const onDisk = jsFiles.map(p => path.relative(ASSETS, p));
+    /* 已知孤儿（2026-09-29 查出）：js/monitor.js（83 行）—— window.FuturesMonitor
+       全仓零引用；实时监控实际由 views/monitor.js 走 API.monitorStart/quote 实现，
+       本文件是移植遗留死代码。**不擅自删除**（删文件不可逆），列为待主人处置。
+       处置后从本表移除；本表为空即代表无孤儿。 */
+    const KNOWN_ORPHANS = ['js/monitor.js'];
+    const orphans = onDisk.filter(d =>
+      !listed.some(l => l.replace(/^js\//, '') === d.replace(/^js\//, '')) &&
+      !KNOWN_ORPHANS.includes(d));
+    ck('无磁盘孤儿脚本（未被 index.html 引入）', orphans.length === 0,
+      orphans.join(' | ') || (onDisk.length - listed.length > 0
+        ? `无新增孤儿（已知待处置：${KNOWN_ORPHANS.join(', ')}）`
+        : '无孤儿'));
+  }
+
+  console.log('\n【分层边界】渲染层/数据层/引擎层不得碰 DOM（CALL-GRAPH §2）');
+  {
+    const PURE = ['views/sim-render.js', 'strategy-library.js', 'sim.js'];
+    const dirty = [];
+    PURE.forEach(f => {
+      const p = path.join(BASE, f);
+      if (!fs.existsSync(p)) return;
+      const src = stripComments(fs.readFileSync(p, 'utf8'));
+      if (/document\./.test(src)) dirty.push(f);
+    });
+    ck('渲染层/数据层/引擎层无 document.', dirty.length === 0, dirty.join(' | ') || `${PURE.length} 个文件保持纯净`);
+  }
 
   console.log('\n══════ 结果：'+pass+' 通过 / '+fail+' 失败 ══════');
   process.exit(fail?1:0);

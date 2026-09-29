@@ -318,13 +318,13 @@
     }
   });
 
-  /* 兼容旧调用点：外部仍可通过 window.SimView 触发（内部一律走中央路由） */
+  /* 兼容旧调用点：外部仍可通过 window.SimView 触发（内部一律走中央路由）
+     ⚠️ CALL-GRAPH §4.1 铁律：本对象**不得导出 onEnter 键**（历史上 app.js 靠它反射调用，
+     正是「注册覆盖」bug 的成因）。页面进入钩子只走上面的 registerPage('vSim', {onEnter})。 */
   window.SimView = {
     run, manualOrder, closeOrder, reset, runAll, pick, loadStrategies,
-    onStrategyChange, updateSpecInfo,
-    onEnter: () => RouteRegistry.dispatch('sim-run-all') && undefined  // 占位，避免被误当页面钩子
+    onStrategyChange, updateSpecInfo
   };
-  delete window.SimView.onEnter;
 
   window.addEventListener('resize', () => chart?.resize());
 })();

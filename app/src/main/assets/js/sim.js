@@ -170,6 +170,84 @@ window.SimEngine = (function () {
    *   riskMode=true 时按「止损距离×乘数」自动算手数（需策略设置 ctx.stopLoss）
    * @returns { account, klines, endIndex }
    */
+  /** 定位截止下标：默认最后一根（最新日期）；给日期则只跑到该日期之前 */
+  function resolveEndIndex(klines, endDate) {
+    let endIndex = klines.length - 1;
+    if (endDate && endDate !== 'latest') {
+      const t = String(endDate);
+      let idx = -1;
+      for (let i = klines.length - 1; i >= 0; i--) { if (String(klines[i].time).slice(0, 10) <= t) { idx = i; break; } }
+      if (idx < 0) idx = klines.length - 1;
+      endIndex = idx;
+    }
+    return endIndex;
+  }
+
+  /** 推进单根：① 盘中硬止损 ② 上一根信号在本根执行 ③ 记录本轮止损与平仓结果、更新权益 */
+  async function advanceOneBar(klines, i, acc, spec, strategy, env) {
+    env = env || {};
+    const bar = klines[i];
+    const ctx = _ctxFor(klines, i, acc, spec);
+
+    // ── 1) 盘中硬止损优先：用【当前根 high/low】判定上一根设置的止损 ──
+    if (acc.position !== 0 && ctx._pendingStop != null) {
+      const stop = ctx._pendingStop;
+      let hit = false, execPrice = null;
+      if (acc.position > 0 && bar.low <= stop) {
+        // 跳空：若开盘已低于止损，按开盘价认亏
+        execPrice = bar.open <= stop ? bar.open : stop;
+        hit = true;
+      } else if (acc.position < 0 && bar.high >= stop) {
+        execPrice = bar.open >= stop ? bar.open : stop;
+        hit = true;
+      }
+      if (hit) {
+        _close(acc, bar, '硬止损', true, i, { execPrice });
+        ctx.stopLoss = null;
+      }
+    }
+
+    // ── 2) 策略信号：用上一根已收盘K线产生，在【当前根】执行 ──
+    const prev = klines[i - 1];
+    if (prev) {
+      // 让策略看到当前根的 stopLoss 状态
+      const signal = await SR.runStrategy(strategy, prev, ctx);
+      if (signal && signal.type) {
+        const reason = signal.reason || '';
+        if (signal.type === 'BUY' || signal.type === 'SELL') {
+          let size;
+          if (env.riskMode && ctx.stopLoss != null) {
+            const entry = _execPrice(bar, signal.type);
+            size = calcSizeByRisk(acc.cash, spec, entry, ctx.stopLoss);
+          } else {
+            size = signal.size || env.fixedQty || 1;
+          }
+          _apply(acc, signal.type, size, bar, reason, true, i);
+        } else if (signal.type === 'REDUCE') {
+          _reduce(acc, signal.ratio || 1 / 3, bar, reason, true, i);
+        } else if (signal.type === 'CLOSE') {
+          _close(acc, bar, reason, true, i);
+        }
+      }
+    }
+
+    // ── 3) 记录本轮止损（供下一根盘中判定）──
+    ctx._pendingStop = acc.position !== 0 ? ctx.stopLoss : null;
+    // 把最近一次平仓结果暴露给策略，便于实现「连亏暂停」等纪律
+    const lastTrade = acc.trades[acc.trades.length - 1];
+    if (lastTrade && lastTrade.time === bar.time && lastTrade.pnl !== undefined) {
+      ctx.lastExit = { reason: lastTrade.close ? 'CLOSE' : (lastTrade.reduce ? 'REDUCE' : 'CLOSE'), pnl: lastTrade.pnl, time: bar.time };
+    }
+
+    _markEquity(acc, bar);
+    acc.lastIndex = i;
+    acc._lastCtx = ctx;
+  }
+
+  /**
+   * 按策略逐根推演（从第一根开始到 endIndex：指标自然预热，信号逐根产生，不偷看未来）
+   * @returns { account, klines, endIndex }
+   */
   async function runStrategy(klines, strategyCode, endDate, opts) {
     opts = opts || {};
     const fixedQty = opts.qty || 1;
@@ -179,76 +257,12 @@ window.SimEngine = (function () {
     const spec = normSpec(opts.spec);
     connState.ctx = SR.createContext({});   // 每次运行重置 ctx.state，策略间互不影响
 
-    // 定位截止下标：默认最后一根（最新日期）；给日期则只跑到该日期之前
-    let endIndex = klines.length - 1;
-    if (endDate && endDate !== 'latest') {
-      const t = String(endDate);
-      let idx = -1;
-      for (let i = klines.length - 1; i >= 0; i--) { if (String(klines[i].time).slice(0, 10) <= t) { idx = i; break; } }
-      if (idx < 0) idx = klines.length - 1;
-      endIndex = idx;
-    }
-
+    const endIndex = resolveEndIndex(klines, endDate);
     const acc = newAccount({ code: opts.code || '', period: opts.period || 101, spec });
+    const env = { riskMode, fixedQty };
 
-    /** 从第一根开始逐根推进到 endIndex：指标自然预热，信号逐根产生，不偷看未来 */
     for (let i = 1; i <= endIndex; i++) {
-      const bar = klines[i];
-      const ctx = _ctxFor(klines, i, acc, spec);
-
-      // ── 1) 盘中硬止损优先：用【当前根 high/low】判定上一根设置的止损 ──
-      if (acc.position !== 0 && ctx._pendingStop != null) {
-        const stop = ctx._pendingStop;
-        let hit = false, execPrice = null;
-        if (acc.position > 0 && bar.low <= stop) {
-          // 跳空：若开盘已低于止损，按开盘价认亏
-          execPrice = bar.open <= stop ? bar.open : stop;
-          hit = true;
-        } else if (acc.position < 0 && bar.high >= stop) {
-          execPrice = bar.open >= stop ? bar.open : stop;
-          hit = true;
-        }
-        if (hit) {
-          _close(acc, bar, '硬止损', true, i, { execPrice });
-          ctx.stopLoss = null;
-        }
-      }
-
-      // ── 2) 策略信号：用上一根已收盘K线产生，在【当前根】执行 ──
-      const prev = klines[i - 1];
-      if (prev) {
-        // 让策略看到当前根的 stopLoss 状态
-        const signal = await SR.runStrategy(strategy, prev, ctx);
-        if (signal && signal.type) {
-          const reason = signal.reason || '';
-          if (signal.type === 'BUY' || signal.type === 'SELL') {
-            let size;
-            if (riskMode && ctx.stopLoss != null) {
-              const entry = _execPrice(bar, signal.type);
-              size = calcSizeByRisk(acc.cash, spec, entry, ctx.stopLoss);
-            } else {
-              size = signal.size || fixedQty;
-            }
-            _apply(acc, signal.type, size, bar, reason, true, i);
-          } else if (signal.type === 'REDUCE') {
-            _reduce(acc, signal.ratio || 1 / 3, bar, reason, true, i);
-          } else if (signal.type === 'CLOSE') {
-            _close(acc, bar, reason, true, i);
-          }
-        }
-      }
-
-      // ── 3) 记录本轮止损（供下一根盘中判定）──
-      ctx._pendingStop = acc.position !== 0 ? ctx.stopLoss : null;
-      // 把最近一次平仓结果暴露给策略，便于实现「连亏暂停」等纪律
-      const lastTrade = acc.trades[acc.trades.length - 1];
-      if (lastTrade && lastTrade.time === bar.time && lastTrade.pnl !== undefined) {
-        ctx.lastExit = { reason: lastTrade.close ? 'CLOSE' : (lastTrade.reduce ? 'REDUCE' : 'CLOSE'), pnl: lastTrade.pnl, time: bar.time };
-      }
-
-      _markEquity(acc, bar);
-      acc.lastIndex = i;
-      acc._lastCtx = ctx;
+      await advanceOneBar(klines, i, acc, spec, strategy, env);
     }
     acc.ctxPosition = acc._lastCtx ? acc._lastCtx.position : acc.position;
     delete acc._lastCtx;

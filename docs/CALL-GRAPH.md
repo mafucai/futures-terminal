@@ -4,7 +4,7 @@
 > 立这份文档的直接触发事件：模拟盘「策略」下拉永远为空 → 跑不了任何策略 → 归因为「策略未接通」，
 > 根因却是中央路由的**注册覆盖**（详见 §5）。这类 bug 靠读单个文件看不出来，**只有蓝图能提前暴露**。
 >
-> 状态：生效中 ｜ 配套可执行自检：`scripts/ui-regression.js`（**34 项断言**，`node scripts/ui-regression.js`；已接入 CI，构建前跑，见 `.github/workflows/apk.yml`）
+> 状态：生效中 ｜ 配套可执行自检：`scripts/ui-regression.js`（**39 项断言**，`node scripts/ui-regression.js`；已接入 CI，构建前跑，见 `.github/workflows/apk.yml`）
 
 ---
 
@@ -84,9 +84,18 @@
 | `fv2_sim_<code>_<period>` | 模拟盘账户快照 | `views/sim.js` | 私有，外部不读 |
 | `fv2_kline_*` / `fv2_futures` | 行情缓存 | `screener.js` Store | 只经 `Screener.readKlineCache` |
 | `ft_stars` | 收藏 | `views/list.js` | 私有 |
-| `fv2_specs*` / `fv2_hithink_key` | 合约规格 / Key | `specs.js` | 只经 `Specs.*` |
+| `fv2_specs` / `fv2_specs_at` | 合约规格 + 拉取时间 | `specs.js` | 只经 `Specs.*` |
+| `fv2_hithink_key` | 同花顺 Key | `specs.js` | 只经 `Specs.getKey/setKey` |
+| `fv2_ai_history` | AI 分析历史 | `api.js` | 只经 `API.aiHistory` |
+| `fv2_last_update` / `fv2_last_full_update` | 行情更新时间戳 | `api.js` | 只经 `API.lastUpdate` |
+| `ft_ai_cfg` | AI 接口配置（含 Key，界面脱敏） | `views/ai.js` | 私有 |
 
 **规则**：一个键只能有一个读写方，第二处出现即视为缺陷。
+
+> ⚠️ **2026-09-29 补表说明**：`fv2_specs_at` / `fv2_last_update` / `fv2_last_full_update` / `ft_ai_cfg`
+> 四个键此前**代码在用、但本表未列** → 「唯一读写方」这条规则对它们完全失效（查不到 = 不设防）。
+> 本次已补入本表，并同步进 `scripts/ui-regression.js` 的 `SHARED_KEYS`（两处**必须一致**，
+> 表驱动断言见「共享键所有权」检查项）。
 
 ---
 
@@ -174,7 +183,7 @@ function registerPage(name, opts) {
 
 **提交前必跑：**
 ```bash
-node scripts/ui-regression.js      # 34 项断言，必须 0 失败
+node scripts/ui-regression.js      # 39 项断言，必须 0 失败（数字以实测输出为准）
 node --check app/src/main/assets/js/views/sim.js   # 逐个改动文件
 ```
 
@@ -190,5 +199,5 @@ node --check app/src/main/assets/js/views/sim.js   # 逐个改动文件
 
 ---
 
-*创建：2026-09-22 ｜ 依据：模拟盘策略链路缺陷复盘 ｜ 回归：`scripts/ui-regression.js` **34 项断言全部通过**（含中央路由、策略链路、模块化阈值、own() 校验、全量语法检查五组）*
-*数字校准：2026-09-28 —— 原写「29 项」为不实陈述（脚本当时因重复声明整脚本 SyntaxError，从未运行过）。修复后实测 34 项，详见 `docs/REGRESSION-AUDIT-20260928.md`。*
+*创建：2026-09-22 ｜ 依据：模拟盘策略链路缺陷复盘 ｜ 回归：`scripts/ui-regression.js` **39 项断言全部通过**（含中央路由、策略链路、模块化阈值、own() 校验、全量语法检查、注入防护、单函数行数、脚本清单一致性、分层边界）*
+*数字校准：2026-09-28 —— 原写「29 项」为不实陈述（脚本当时因重复声明整脚本 SyntaxError，从未运行过）。修复后实测 34 项，详见 `docs/REGRESSION-AUDIT-20260928.md`。**2026-09-29 —— 按本蓝图四张表逐项排查后修复 6 类问题（内联事件注入 / api.js 超行 / 2 个超 60 行函数 / §3 表缺 4 键 / 手写加载清单 / 孤儿文件 js/monitor.js），断言 34 → 39 项，全部通过。详见 `docs/LAYER-AUDIT-20260929.md`。*

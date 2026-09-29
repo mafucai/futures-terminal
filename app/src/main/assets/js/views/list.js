@@ -33,6 +33,10 @@
     renderList();
   }
 
+  /* 收藏栏：**不再把值拼进 onclick**（CALL-GRAPH §4.3）。
+     原写法把 code 拼进 onclick（形如 事件属性内嵌字符串插值）有注入风险：onclick 是 HTML 属性，
+     浏览器会先把 &#39; 解码回 '，从而闭合 JS 字符串（实测可注入）。
+     改为 data-* + 事件委托，值不参与 JS 拼接。 */
   function renderFavBar() {
     const bar = document.getElementById('favBar');
     const cnt = document.getElementById('favCount');
@@ -41,9 +45,28 @@
     if (!STATE.stars.size) { bar.style.display = 'none'; return; }
     bar.style.display = 'flex';
     bar.innerHTML = [...STATE.stars].map(code =>
-      `<span class="chip" onclick="RouteRegistry.dispatch('open-detail',{code:'${UI.esc(code)}'})">` +
-      `${UI.esc(code)}<i onclick="event.stopPropagation();ListView.toggleStar('${UI.esc(code)}')">✕</i></span>`
+      `<span class="chip" data-code="${UI.esc(code)}">` +
+      `${UI.esc(code)}<i class="chip-x" data-unstar="1">✕</i></span>`
     ).join('');
+    bindFavBar();
+  }
+
+  // 收藏栏事件委托（每次重渲染后重新绑定；bar.innerHTML 会清掉旧监听）
+  function bindFavBar() {
+    const bar = document.getElementById('favBar');
+    if (!bar || bar.dataset.bound === '1') return;
+    bar.dataset.bound = '1';
+    bar.addEventListener('click', (e) => {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      const code = chip.dataset.code;
+      if (e.target.dataset.unstar === '1') {
+        e.stopPropagation();          // 点 ✕ 只取消收藏，不开详情
+        toggleStar(code);
+        return;
+      }
+      RouteRegistry.dispatch('open-detail', { code });
+    });
   }
 
   function card(q) {
