@@ -71,26 +71,21 @@ jobs:
           echo "选定产物: ${UNSIGNED}"
           SIGNED="app/build/outputs/apk/release/futuresterminal-release.apk"
 
-          # 2) 决定签名方式：有 Secrets 用固定签名；没有则生成临时 keystore（验证包）
-          if [ -n "${KEYSTORE_B64:-}" ]; then
-            echo "使用 Secrets 中的固定签名（可覆盖安装）"
-            echo -n "${KEYSTORE_B64}" | base64 -d > release-fixed.jks
-            test -s release-fixed.jks
-            KS_PASS="${KEYSTORE_PASS}"
-            KS_ALIAS="${KEYSTORE_ALIAS_NAME}"
-            KS_KEYPASS="${KEY_PASS:-${KEYSTORE_PASSWORD}}"
-          else
-            echo "::warning::未配置 KEYSTORE_BASE64，生成临时 keystore（验证包，不能覆盖安装正式包）"
-            KS_PASS="android"
-            KS_ALIAS="androiddebugkey"
-            KS_KEYPASS="android"
-            keytool -genkeypair -v -keystore release-temp.jks \
-              -alias "${KS_ALIAS}" -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass "${KS_PASS}" -keypass "${KS_KEYPASS}" \
-              -dname "CN=FuturesTerminal, OU=CI, O=CI, L=CI, S=CI, C=CN" > /dev/null 2>&1
-            cp release-temp.jks release-fixed.jks
-            test -s release-fixed.jks
+          # 2) 固定正式签名：必须从 Secrets 还原 keystore。
+          #    禁止回退临时随机签名——那会让已安装的正式包无法覆盖升级
+          #    （见 docs/ANDROID_SIGNING.md 第 3 节第 1、6 条）。
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "::error::未配置 KEYSTORE_BASE64。固定签名需要 Repository Secrets："
+            echo "::error::KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEYSTORE_ALIAS / KEY_PASSWORD"
+            echo "::error::禁止回退为临时随机签名（见 docs/ANDROID_SIGNING.md）。"
+            exit 1
           fi
+          echo "使用 Secrets 中的固定签名（可覆盖安装）"
+          echo -n "${KEYSTORE_B64}" | base64 -d > release-fixed.jks
+          test -s release-fixed.jks
+          KS_PASS="${KEYSTORE_PASS}"
+          KS_ALIAS="${KEYSTORE_ALIAS_NAME}"
+          KS_KEYPASS="${KEY_PASS:-${KEYSTORE_PASSWORD}}"
 
           # 3) 签名 + 验证（标准顺序，模板硬约束）
           "${BT}/apksigner" sign \
@@ -100,12 +95,35 @@ jobs:
           "${BT}/apksigner" verify "${SIGNED}"
           "${BT}/apksigner" verify --print-certs "${SIGNED}" | head -4
 
+          # 3b) 固定签名指纹硬校验：证书 SHA-256 必须等于固定签名资产。
+          #     指纹不符 = 用错了 keystore，已安装用户将无法覆盖升级，必须硬失败。
+          #     （旧版只打印 --print-certs 供人肉核对，不构成门禁，此处补上。）
+          CERT_OUT="$("${BT}/apksigner" verify --print-certs "${SIGNED}")"
+          normalize_fp() { printf '%s' "$1" | tr -d ':' | tr -d '[:space:]' | tr 'A-Z' 'a-z'; }
+          GOT_FP="$(echo "$CERT_OUT" | grep -m1 -i 'SHA-256 digest' | sed 's/.*digest:[[:space:]]*//')"
+          if [ -z "$GOT_FP" ]; then
+            # 兜底：某些版本直接打印带冒号的裸指纹行
+            GOT_FP="$(echo "$CERT_OUT" | grep -m1 -oE '([0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}')"
+          fi
+          EXPECTED_FP="15:32:B4:21:35:16:65:64:EA:C8:DE:F1:8E:AA:89:8D:F6:E7:17:93:70:82:90:F6:84:6F:D6:C2:77:1F:2B:17"
+          GOT_N="$(normalize_fp "$GOT_FP")"
+          WANT_N="$(normalize_fp "$EXPECTED_FP")"
+          echo "signer_sha256_normalized=$GOT_N"
+          if [ -z "$GOT_N" ] || [ "$GOT_N" != "$WANT_N" ]; then
+            echo "::error::APK 签名证书指纹与固定签名资产不一致。"
+            echo "::error::expected=$WANT_N"
+            echo "::error::actual  =$GOT_N"
+            echo "::error::请核对 Secrets 中的 KEYSTORE_BASE64 是否为固定签名资产（docs/ANDROID_SIGNING.md）。"
+            exit 1
+          fi
+          echo "fixed signing certificate fingerprint verified"
+
           # 4) 构建后 APK 级验证
           stat -c '%s bytes %n' "${SIGNED}"
           unzip -tq "${SIGNED}"
           sha256sum "${SIGNED}"
 
-          rm -f release-fixed.jks release-temp.jks
+          rm -f release-fixed.jks
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
